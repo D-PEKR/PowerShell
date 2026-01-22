@@ -18,13 +18,19 @@ if ($runInBackground -eq "j") {
         powershell.exe -NoProfile -ExecutionPolicy Bypass -File $path
     } -ArgumentList $scriptPath | Out-Null
 
-    Write-Host "Das Skript läuft nun im Hintergrund. Log-Datei: $env:ProgramData\UpdateScript\update_log.txt"
+    Write-Host "Das Skript läuft nun im Hintergrund. Log-Datei: $env:ProgramData\PowerShellScript\update_log.txt"
     exit
 }
 
+# --- Setzen der Berechtigung für die Ausführung ---
+Set-ExecutionPolicy Bypass -Scope Process -Force
+Set-ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
+
 # --- Einstellungen ---
-$LogFile = "$env:ProgramData\UpdateScript\update_log.txt"
-$AutoReboot = $true   # auf $false setzen, wenn kein automatischer Neustart gewünscht ist
+$timestamp = (Get-Date).ToString("yyyy-MM-dd_HH-mm-ss")
+$LogFile = "$env:ProgramData\PowerShellScript\update_log_$timestamp.txt"
+$AutoReboot = $true
+
 
 # --- Logging Funktion ---
 function Write-Log {
