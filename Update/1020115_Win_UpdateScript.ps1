@@ -1,26 +1,41 @@
-# Skript immer im Hintergrund starten
+param(
+    [switch]$RUN_IN_BACKGROUND,
+    [string]$LOGFILE
+)
 
-if (-not $env:RUN_IN_BACKGROUND) {
+# Logging-Modul importieren
+Import-Module "C:\Users\Debeka\IdeaProjects\PowerShell\Logging.psm1" -Force
+
+if (-not $RUN_IN_BACKGROUND) {
+
+    # Einmaliges Logfile pro Ausführung erzeugen
+    $logFileName = "update_$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss').log"
+
+    # Logger initialisieren
+    Initialize-Logger -FileName $logFileName -Level "INFO" -ConsoleOutput $true -MaxSizeMB 5
     Write-Log -Level INFO -Message "Starte Skript im Hintergrund..."
 
     $scriptPath = $MyInvocation.MyCommand.Path
 
-    Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" -RUN_IN_BACKGROUND 1" -WindowStyle Hidden
+    # Hintergrundprozess starten (Parameter, keine Environment-Variablen)
+    Start-Process powershell.exe `
+        -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" -RUN_IN_BACKGROUND -LOGFILE `"$logFileName`"" `
+        -WindowStyle Hidden
 
     Write-Log -Level INFO -Message "Skript läuft nun im Hintergrund."
     exit
 }
 
+if (-not $LOGFILE) {
+    throw "Fehler: LOGFILE wurde nicht übergeben."
+}
+
+Initialize-Logger -FileName $LOGFILE -Level "INFO" -ConsoleOutput $true -MaxSizeMB 5
+Write-Log -Level INFO -Message "Update-Skript gestartet (Hintergrundmodus)."
 
 # ExecutionPolicy setzen
-
 Set-ExecutionPolicy Bypass -Scope Process -Force
 Set-ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
-
-Write-Log -Level INFO -Message "Update-Skript gestartet."
-
-
-# PSWindowsUpdate installieren falls nötig
 
 if (-not (Get-Module -ListAvailable -Name PSWindowsUpdate)) {
     Write-Log -Level INFO -Message "PSWindowsUpdate wird installiert..."
@@ -38,35 +53,50 @@ if (-not (Get-Module -ListAvailable -Name PSWindowsUpdate)) {
 
 Import-Module PSWindowsUpdate
 
+Write-Log -Level INFO -Message "Suche nach Windows Updates..."
 
-# Windows Updates suchen
+$windowsUpdates = Get-WindowsUpdate -MicrosoftUpdate -AcceptAll -ErrorAction SilentlyContinue |
+                  Where-Object { $_.UpdateType -ne "Driver" }
 
-Write-Log -Level INFO -Message "Suche nach Windows Updates und Treiberupdates..."
-
-$updates = Get-WindowsUpdate -MicrosoftUpdate -AcceptAll -ErrorAction SilentlyContinue
-
-if (-not $updates -or $updates.Count -eq 0) {
-    Write-Log -Level INFO -Message "Keine Windows Updates verfügbar."
+if (-not $windowsUpdates) {
+    Write-Log -Level INFO -Message "Keine Windows Updates gefunden."
 }
 else {
-    Write-Log -Level INFO -Message "Gefundene Updates:"
-    $updates | Format-Table -AutoSize | Out-String | ForEach-Object {
-        Write-Log -Level DEBUG -Message $_
+    Write-Log -Level INFO -Message "Gefundene Windows Updates:"
+    $windowsUpdates | ForEach-Object {
+        Write-Log -Level INFO -Message ("Windows Update: " + $_.Title)
     }
+}
 
-    Write-Log -Level INFO -Message "Installiere Updates (ohne Neustart)..."
+Write-Log -Level INFO -Message "Suche nach Treiberupdates..."
+
+$driverUpdates = Get-WindowsUpdate -MicrosoftUpdate -AcceptAll -ErrorAction SilentlyContinue |
+                 Where-Object { $_.UpdateType -eq "Driver" }
+
+if (-not $driverUpdates) {
+    Write-Log -Level INFO -Message "Keine Treiberupdates gefunden."
+}
+else {
+    Write-Log -Level INFO -Message "Gefundene Treiberupdates:"
+    $driverUpdates | ForEach-Object {
+        Write-Log -Level INFO -Message ("Treiber: " + $_.Title)
+    }
+}
+
+if ($windowsUpdates -or $driverUpdates) {
+    Write-Log -Level INFO -Message "Installiere Updates (Windows + Treiber)..."
 
     try {
         Install-WindowsUpdate -MicrosoftUpdate -AcceptAll -IgnoreReboot -ErrorAction SilentlyContinue
-        Write-Log -Level INFO -Message "Windows Updates abgeschlossen."
+        Write-Log -Level INFO -Message "Updates erfolgreich installiert."
     }
     catch {
         Write-Log -Level ERROR -Message "Fehler bei der Installation der Updates: $_"
     }
 }
-
-
-# Treiberupdates aktivieren
+else {
+    Write-Log -Level INFO -Message "Keine Updates zur Installation vorhanden."
+}
 
 try {
     Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching" `
@@ -77,9 +107,6 @@ try {
 catch {
     Write-Log -Level ERROR -Message "Fehler beim Aktivieren der Treiberupdates: $_"
 }
-
-
-# Winget Software-Updates
 
 Write-Log -Level INFO -Message "Starte Software-Updates über Winget..."
 

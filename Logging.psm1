@@ -1,7 +1,3 @@
-# --- Logging.psm1 ---
-# Enthält NUR Variablen + Funktionen
-# KEIN Dot-Sourcing, KEIN Initialize-Logger-Aufruf
-
 # Globale Variablen
 $Global:LogFilePath = $null
 $Global:LogLevel = "INFO"
