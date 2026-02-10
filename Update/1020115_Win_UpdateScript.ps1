@@ -4,7 +4,7 @@ param(
 )
 
 # Logging-Modul importieren
-Import-Module "C:\Users\Debeka\IdeaProjects\PowerShell\Logging.psm1" -Force
+Import-Module "C:\Users\USERNAME\IdeaProjects\PowerShell\Logging.psm1" -Force
 
 if (-not $RUN_IN_BACKGROUND) {
 
