@@ -3,7 +3,7 @@ $Global:LogFilePath = $null
 $Global:LogLevel = "INFO"
 $Global:EnableConsoleOutput = $true
 $Global:MaxLogSizeMB = 5
-$Global:DefaultLogFolder = "C:\Users\Debeka\IdeaProjects\PowerShell\LOGS\"
+$Global:DefaultLogFolder = "C:\Users\USERNAME\IdeaProjects\PowerShell\LOGS\"
 
 function Initialize-Logger {
     param(
