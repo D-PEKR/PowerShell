@@ -1,4 +1,4 @@
-Import-Module "$PSScriptRoot\Logging\Logging.psm1"
+Import-Module "$PSScriptRoot\Logging.psm1"
 Initialize-Logger -Level "DEBUG"
 
 Write-Log -Level INFO -Message "Erfasse installierte Programme (64-bit & 32-bit)..."
