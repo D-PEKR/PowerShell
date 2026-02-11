@@ -1,4 +1,5 @@
-Import-Module "$PSScriptRoot\Logging\Logging.psm1"
+$modulePath = Join-Path -Path $PSScriptRoot -ChildPath "..\Logging.psm1"
+Import-Module $modulePath
 Initialize-Logger -Level "DEBUG"
 
 Write-Log -Level INFO -Message "Erfasse installierte Programme (64-bit & 32-bit)..."

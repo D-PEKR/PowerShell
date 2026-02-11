@@ -4,7 +4,8 @@ param(
 )
 
 # Logging-Modul importieren
-Import-Module "C:\Users\Debeka\IdeaProjects\PowerShell\Logging.psm1" -Force
+$modulePath = Join-Path -Path $PSScriptRoot -ChildPath "..\Logging.psm1"
+Import-Module $modulePath
 
 if (-not $RUN_IN_BACKGROUND) {
 
