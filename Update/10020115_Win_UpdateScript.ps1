@@ -57,7 +57,7 @@ Import-Module PSWindowsUpdate
 Write-Log -Level INFO -Message "Suche nach Windows Updates..."
 
 $windowsUpdates = Get-WindowsUpdate -MicrosoftUpdate -AcceptAll -ErrorAction SilentlyContinue |
-                  Where-Object { $_.UpdateType -ne "Driver" }
+Where-Object { $_.UpdateType -ne "Driver" }
 
 if (-not $windowsUpdates) {
     Write-Log -Level INFO -Message "Keine Windows Updates gefunden."
@@ -72,7 +72,7 @@ else {
 Write-Log -Level INFO -Message "Suche nach Treiberupdates..."
 
 $driverUpdates = Get-WindowsUpdate -MicrosoftUpdate -AcceptAll -ErrorAction SilentlyContinue |
-                 Where-Object { $_.UpdateType -eq "Driver" }
+Where-Object { $_.UpdateType -eq "Driver" }
 
 if (-not $driverUpdates) {
     Write-Log -Level INFO -Message "Keine Treiberupdates gefunden."
@@ -88,8 +88,23 @@ if ($windowsUpdates -or $driverUpdates) {
     Write-Log -Level INFO -Message "Installiere Updates (Windows + Treiber)..."
 
     try {
-        Install-WindowsUpdate -MicrosoftUpdate -AcceptAll -IgnoreReboot -ErrorAction SilentlyContinue
-        Write-Log -Level INFO -Message "Updates erfolgreich installiert."
+        $results = Install-WindowsUpdate -MicrosoftUpdate -AcceptAll -IgnoreReboot -ErrorAction SilentlyContinue
+
+        foreach ($res in $results) {
+            $msg = "Update: $($res.Title) | Result: $($res.Result)"
+
+            if ($res.HResult) {
+                $msg += " | ExitCode: $($res.HResult)"
+            }
+            else {
+                $msg += " | ExitCode: (nicht verfügbar)"
+            }
+
+
+            Write-Log -Level INFO -Message $msg
+        }
+
+        Write-Log -Level INFO -Message "Updates abgeschlossen."
     }
     catch {
         Write-Log -Level ERROR -Message "Fehler bei der Installation der Updates: $_"
@@ -113,6 +128,21 @@ Write-Log -Level INFO -Message "Starte Software-Updates über Winget..."
 
 try {
     winget source update | Out-Null
+
+    # Upgrade-Liste als JSON abrufen
+    $upgradeListJson = winget upgrade --accept-source-agreements --accept-package-agreements --output json
+    $upgradeList = $upgradeListJson | ConvertFrom-Json
+
+    if ($upgradeList) {
+        foreach ($item in $upgradeList) {
+            Write-Log -Level INFO -Message "Upgrade verfügbar: $($item.Id) | $($item.Name) | Installed: $($item.InstalledVersion) → Available: $($item.AvailableVersion)"
+        }
+    }
+    else {
+        Write-Log -Level INFO -Message "Keine Software-Updates verfügbar."
+    }
+
+    # Updates installieren
     winget upgrade --all --silent --accept-package-agreements --accept-source-agreements | Out-Null
 
     Write-Log -Level INFO -Message "Software-Updates abgeschlossen."
