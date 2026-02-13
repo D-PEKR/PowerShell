@@ -130,7 +130,7 @@ try {
     winget source update | Out-Null
 
     # Upgrade-Liste als JSON abrufen
-    $upgradeListJson = winget upgrade --accept-source-agreements --accept-package-agreements --output json
+    $upgradeListJson = cmd /c "set LANG=en-US && winget upgrade --accept-source-agreements --accept-package-agreements --output json"
     $upgradeList = $upgradeListJson | ConvertFrom-Json
 
     if ($upgradeList) {
