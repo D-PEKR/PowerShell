@@ -2,7 +2,7 @@ $modulePath = Join-Path -Path $PSScriptRoot -ChildPath "..\Logging.psm1"
 Import-Module $modulePath
 Initialize-Logger -FileName "GPO_Computer_Personalization"
 
-Write-Log -Level INFO -Message "Starte Computerkonfiguration – Personalisierung"
+Write-Log -Level INFO -Message "Starte Computerkonfiguration - Personalisierung"
 
 $RegPers = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization"
 New-Item $RegPers -Force | Out-Null
@@ -17,4 +17,4 @@ Write-Log -Level INFO -Message "GPO gesetzt: Sperrbildschirmbild erzwingen ($Loc
 Set-ItemProperty -Path $RegPers -Name "NoChangingStartMenuBackground" -Value 1 -Type DWord
 Write-Log -Level INFO -Message "GPO gesetzt: Startmenühintergrund ändern verhindern"
 
-Write-Log -Level INFO -Message "Computerkonfiguration – Personalisierung abgeschlossen"
+Write-Log -Level INFO -Message "Computerkonfiguration - Personalisierung abgeschlossen"

@@ -3,7 +3,7 @@ $modulePath = Join-Path -Path $PSScriptRoot -ChildPath "..\Logging.psm1"
 Import-Module $modulePath
 Initialize-Logger -FileName "GPO_User_Personalization"
 
-Write-Log -Level INFO -Message "Starte Benutzerkonfiguration – Personalisierung"
+Write-Log -Level INFO -Message "Starte Benutzerkonfiguration - Personalisierung"
 
 # Registry-Pfade
 $RegExplorer = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer"
@@ -43,4 +43,4 @@ $ThemePath = "C:\Users\DLRG-JugendAndernach\OneDrive - DLRG OG Andernach e.V\Bil
 Set-ItemProperty -Path $RegExplorer -Name "ThemeFile" -Value $ThemePath -Type String
 Write-Log -Level INFO -Message "GPO gesetzt: Bestimmtes Design laden ($ThemePath)"
 
-Write-Log -Level INFO -Message "Benutzerkonfiguration – Personalisierung abgeschlossen"
+Write-Log -Level INFO -Message "Benutzerkonfiguration - Personalisierung abgeschlossen"
