@@ -1,6 +1,6 @@
 $modulePath = Join-Path -Path $PSScriptRoot -ChildPath "..\Logging.psm1"
 Import-Module $modulePath
-Initialize-Logger -FileName "GPO_OEM_and_LegalNotice.log"
+Initialize-Logger -FileName "GPO_OEM_and_LegalNotice"
 
 Write-Log -Level INFO -Message "Starte OEM-Branding & Legal Notice Konfiguration"
 

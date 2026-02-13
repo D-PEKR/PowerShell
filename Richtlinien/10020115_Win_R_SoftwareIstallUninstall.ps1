@@ -1,6 +1,6 @@
 $modulePath = Join-Path -Path $PSScriptRoot -ChildPath "..\Logging.psm1"
 Import-Module $modulePath
-Initialize-Logger -FileName "GPO_Programs_User.log"
+Initialize-Logger -FileName "GPO_Programs_User"
 
 Write-Log -Level INFO -Message "Starte Benutzerkonfiguration - Programme hinzufügen/entfernen"
 

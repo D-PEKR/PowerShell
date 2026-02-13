@@ -1,6 +1,6 @@
 $modulePath = Join-Path -Path $PSScriptRoot -ChildPath "..\Logging.psm1"
 Import-Module $modulePath
-Initialize-Logger -FileName "GPO_PIN_Complexity.log"
+Initialize-Logger -FileName "GPO_PIN_Complexity"
 
 Write-Log -Level INFO -Message "Starte PIN-Komplexität GPOs"
 

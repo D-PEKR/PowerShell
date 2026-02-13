@@ -1,7 +1,7 @@
 
 $modulePath = Join-Path -Path $PSScriptRoot -ChildPath "..\Logging.psm1"
 Import-Module $modulePath
-Initialize-Logger -FileName "GPO_User_Personalization.log"
+Initialize-Logger -FileName "GPO_User_Personalization"
 
 Write-Log -Level INFO -Message "Starte Benutzerkonfiguration – Personalisierung"
 

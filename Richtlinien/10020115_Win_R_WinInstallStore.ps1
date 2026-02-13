@@ -1,6 +1,6 @@
 $modulePath = Join-Path -Path $PSScriptRoot -ChildPath "..\Logging.psm1"
 Import-Module $modulePath
-Initialize-Logger -FileName "GPO_AppControl.log"
+Initialize-Logger -FileName "GPO_AppControl"
 
 Write-Log -Level INFO -Message "Starte AppControl GPOs"
 
