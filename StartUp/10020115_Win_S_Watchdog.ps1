@@ -1,10 +1,38 @@
+# ---------------------------------------------------------
+# Gemeinsame Initialisierung
+# ---------------------------------------------------------
 $modulePath = Join-Path -Path $PSScriptRoot -ChildPath "..\Logging.psm1"
 Import-Module $modulePath
-Initialize-Logger -FileName "GPO_Watchdog" -Level "INFO"
+Initialize-Logger -FileName "System_Watchdog" -Level "INFO"
 
-Write-Log -Level INFO -Message "Starte GPO-Watchdog Prüfung"
+Write-Log -Level INFO -Message "Starte kombinierten System-Watchdog"
 
-# Hilfsfunktion: Registry prüfen
+# ---------------------------------------------------------
+# Hilfsfunktion: Skript relativ ausführen
+# ---------------------------------------------------------
+function Run-RelativeScript {
+    param([string]$RelativePath)
+
+    try {
+        $FullPath = Join-Path $PSScriptRoot $RelativePath
+        $FullPath = (Resolve-Path $FullPath).Path
+
+        if (Test-Path $FullPath) {
+            Write-Log -Level INFO -Message "Starte Script: $FullPath"
+            powershell.exe -ExecutionPolicy Bypass -File $FullPath
+        }
+        else {
+            Write-Log -Level ERROR -Message "Script nicht gefunden: $FullPath"
+        }
+    }
+    catch {
+        Write-Log -Level ERROR -Message "Fehler beim Ausführen von $RelativePath – $_"
+    }
+}
+
+# ---------------------------------------------------------
+# Hilfsfunktion: Registry-Werte prüfen
+# ---------------------------------------------------------
 function Test-PolicyValue {
     param(
         [string]$Path,
@@ -27,41 +55,44 @@ function Test-PolicyValue {
     return $true
 }
 
-# Prüfliste aller Richtlinien
+# ---------------------------------------------------------
+# STARTUP-WATCHDOG
+# ---------------------------------------------------------
+Write-Log -Level INFO -Message "Starte Startup-Watchdog"
+
+Run-RelativeScript "..\Programme\10020115_Win_Log_Software.ps1"
+Run-RelativeScript "..\Update\10020115_Win_UpdateScript.ps1"
+
+Write-Log -Level INFO -Message "Startup-Watchdog abgeschlossen"
+
+# ---------------------------------------------------------
+# GPO-WATCHDOG
+# ---------------------------------------------------------
+Write-Log -Level INFO -Message "Starte GPO-Watchdog Prüfung"
 
 $Checks = @(
-    # Benutzer-Personalisierung
     @{ Path="HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System"; Name="NoDispAppearancePage"; Expected=1 },
     @{ Path="HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer"; Name="NoThemesTab"; Expected=1 },
     @{ Path="HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\ActiveDesktop"; Name="NoChangingWallPaper"; Expected=1 },
 
-    # Programme hinzufügen/entfernen
     @{ Path="HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\Uninstall"; Name="NoAddRemovePrograms"; Expected=1 },
 
-    # Computer-Personalisierung
     @{ Path="HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization"; Name="NoChangingStartMenuBackground"; Expected=1 },
 
-    # Windows Installer
     @{ Path="HKLM:\SOFTWARE\Policies\Microsoft\Windows\Installer"; Name="DisableMSI"; Expected=2 },
 
-    # Store
     @{ Path="HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore"; Name="RemoveWindowsStore"; Expected=1 },
 
-    # PIN-Komplexität
     @{ Path="HKLM:\SOFTWARE\Policies\Microsoft\PassportForWork\PINComplexity"; Name="MinimumPINLength"; Expected=8 },
     @{ Path="HKLM:\SOFTWARE\Policies\Microsoft\PassportForWork\PINComplexity"; Name="Digits"; Expected=1 },
     @{ Path="HKLM:\SOFTWARE\Policies\Microsoft\PassportForWork\PINComplexity"; Name="LowercaseLetters"; Expected=1 },
     @{ Path="HKLM:\SOFTWARE\Policies\Microsoft\PassportForWork\PINComplexity"; Name="UppercaseLetters"; Expected=1 },
     @{ Path="HKLM:\SOFTWARE\Policies\Microsoft\PassportForWork\PINComplexity"; Name="SpecialCharacters"; Expected=1 },
 
-    # OEM-Information
     @{ Path="HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\OEMInformation"; Name="Manufacturer"; Expected="DLRG-Jugend Andernach | EDV & Technik" },
 
-    # Legal Notice
     @{ Path="HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"; Name="legalnoticecaption"; Expected="DLRG-Jugend Andernach – IT Sicherheitshinweis" }
 )
-
-# Prüfung durchführen
 
 $PolicyMismatch = $false
 
@@ -71,8 +102,6 @@ foreach ($check in $Checks) {
     }
 }
 
-# Ergebnis auswerten
-
 if ($PolicyMismatch -eq $false) {
     Write-Log -Level INFO -Message "Alle Richtlinien korrekt. Beende mit ExitCode 0."
     exit 0
@@ -80,8 +109,9 @@ if ($PolicyMismatch -eq $false) {
 
 Write-Log -Level WARN -Message "Abweichungen erkannt - GPO-Skripte werden erneut ausgeführt."
 
+# ---------------------------------------------------------
 # GPO-Skripte erneut anwenden
-
+# ---------------------------------------------------------
 $ScriptFolder = "C:\Programme\PowerShellScripte\Richtlinien\"
 
 $Scripts = @(
