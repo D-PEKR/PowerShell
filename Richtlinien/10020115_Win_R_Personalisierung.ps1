@@ -1,5 +1,6 @@
 
-$modulePath = Join-Path -Path $PSScriptRoot -ChildPath "..\Logging.psm1"
+$modulePath = "C:\Program Files\10020115_WinScripts\Scripte\Logging.psm1"
+
 Import-Module $modulePath
 Initialize-Logger -FileName "GPO_User_Personalization"
 

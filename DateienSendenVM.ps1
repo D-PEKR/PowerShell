@@ -1,6 +1,6 @@
-Copy-VMFile -VMName "*Win11Pro_TestUmgebung*" `
+Copy-VMFile -VMName "*Win11ProTestUmgebung*" `
     -SourcePath "C:\Users\Debeka\IdeaProjects\PowerShell.zip" `
-    -DestinationPath "C:\Users\Win11ProTestUmgebung\Desktop\PowerShell.zip" `
+    -DestinationPath "C:\Users\Win11ProTest\Desktop\PowerShell.zip" `
     -CreateFullPath `
     -FileSource Host
 
