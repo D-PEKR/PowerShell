@@ -2,7 +2,7 @@
 $modulePath = "C:\Program Files\10020115_WinScripts\Scripte\Logging.psm1"
 Import-Module $modulePath -ErrorAction Stop
 
-Initialize-Logger -FileName "GPO_Computer_Personalization"
+Initialize-Logger -Level "INFO"
 
 Write-Log -Level INFO -Message "Starte Computerkonfiguration - Personalisierung"
 

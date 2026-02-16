@@ -1,6 +1,8 @@
+# Modul laden
 $modulePath = "C:\Program Files\10020115_WinScripts\Scripte\Logging.psm1"
-Import-Module $modulePath
-Initialize-Logger -FileName "GPO_PIN_Complexity"
+Import-Module $modulePath -ErrorAction Stop
+
+Initialize-Logger -Level "INFO"
 
 Write-Log -Level INFO -Message "Starte PIN-Komplexität GPOs"
 

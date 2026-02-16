@@ -3,9 +3,7 @@ $modulePath = "C:\Program Files\10020115_WinScripts\Scripte\Logging.psm1"
 Import-Module $modulePath -ErrorAction Stop
 
 Initialize-Logger -Level "Install Software"
-# ------------------------------------------------------------
-# Funktion: Install-MSI (mit Logging)
-# ------------------------------------------------------------
+
 function Install-MSI {
     param(
         [Parameter(Mandatory=$true)]
@@ -30,9 +28,8 @@ function Install-MSI {
     }
 }
 
-# ------------------------------------------------------------
 # Funktion: Uninstall-MSI (mit Logging)
-# ------------------------------------------------------------
+
 function Uninstall-MSI {
     param(
         [Parameter(Mandatory=$true)]

@@ -1,11 +1,16 @@
-$modulePath = Join-Path -Path $PSScriptRoot -ChildPath "..\Logging.psm1"
-Import-Module $modulePath
-Initialize-Logger -Level "DEBUG"
+# Modul laden
+$modulePath = "C:\Program Files\10020115_WinScripts\Scripte\Logging.psm1"
+Import-Module $modulePath -ErrorAction Stop
 
-Write-Log -Level INFO -Message "Erfasse installierte Programme (64-bit & 32-bit)..."
+Initialize-Logger -Level "INFO"
 
-$path64 = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"
-$path32 = "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
+Write-Log -Level INFO -Message "=== Software-Inventur gestartet ==="
+
+# Registry-Pfade für klassische Programme
+$classicPaths = @(
+    "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall",
+    "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
+)
 
 function Get-InstalledPrograms {
     param([string]$RegistryPath)
@@ -25,21 +30,41 @@ function Get-InstalledPrograms {
     }
 }
 
-$programs64 = Get-InstalledPrograms -RegistryPath $path64
-$programs32 = Get-InstalledPrograms -RegistryPath $path32
+# === Klassische Programme ===
+Write-Log -Level INFO -Message "=== Klassische Programme ==="
 
-$allPrograms = $programs64 + $programs32
+try {
+    $classicApps = foreach ($path in $classicPaths) {
+        Get-InstalledPrograms -RegistryPath $path
+    }
 
-if ($allPrograms.Count -eq 0) {
-    Write-Log -Level WARN -Message "Keine installierten Programme gefunden."
-}
-else {
-    Write-Log -Level INFO -Message "Installierte Programme gefunden: $($allPrograms.Count)"
-
-    foreach ($program in $allPrograms) {
-        $line = "Name='$($program.Name)' Version='$($program.Version)' Publisher='$($program.Publisher)' InstallDate='$($program.InstallDate)'"
-        Write-Log -Level DEBUG -Message $line
+    if ($classicApps.Count -eq 0) {
+        Write-Log -Level WARN -Message "Keine klassischen Programme gefunden."
+    }
+    else {
+        foreach ($app in $classicApps | Sort-Object Name) {
+            Write-Log -Level INFO -Message "Programm: $($app.Name) | Version: $($app.Version) | Publisher: $($app.Publisher)"
+        }
     }
 }
+catch {
+    Write-Log -Level ERROR -Message "Fehler beim Auslesen klassischer Programme: $($_.Exception.Message)"
+}
 
-Write-Log -Level INFO -Message "Software-Inventur abgeschlossen."
+# === UWP / Store Apps ===
+Write-Log -Level INFO -Message "=== UWP / Store Apps ==="
+
+try {
+    $uwpApps = Get-AppxPackage |
+        Select-Object Name, Version, Publisher |
+        Sort-Object Name
+
+    foreach ($app in $uwpApps) {
+        Write-Log -Level INFO -Message "UWP-App: $($app.Name) | Version: $($app.Version) | Publisher: $($app.Publisher)"
+    }
+}
+catch {
+    Write-Log -Level ERROR -Message "Fehler beim Auslesen der UWP-Apps: $($_.Exception.Message)"
+}
+
+Write-Log -Level INFO -Message "=== Software-Inventur abgeschlossen ==="

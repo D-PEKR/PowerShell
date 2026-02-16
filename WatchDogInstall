@@ -1,4 +1,4 @@
-$Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ExecutionPolicy Bypass -File C:\Programme\PowerShellScripte\StartUp\10020115_Win_S_WatchdogGPO.ps1"
+$Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ExecutionPolicy Bypass -File C:\Programme\10020115_WinScripts\StartUp\10020115_Win_S_WatchdogGPO.ps1"
 $Trigger = New-ScheduledTaskTrigger -AtStartup
 $Principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest
 

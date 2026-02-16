@@ -1,138 +1,90 @@
-# ---------------------------------------------------------
-# Gemeinsame Initialisierung
-# ---------------------------------------------------------
-$modulePath = Join-Path -Path $PSScriptRoot -ChildPath "..\Logging.psm1"
-Import-Module $modulePath
-Initialize-Logger -FileName "System_Watchdog" -Level "INFO"
+# ================================
+# WATCHDOG MIT LOGGER
+# ================================
 
-Write-Log -Level INFO -Message "Starte kombinierten System-Watchdog"
+# Basisverzeichnis des Watchdogs
+$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-# ---------------------------------------------------------
-# Hilfsfunktion: Skript relativ ausführen
-# ---------------------------------------------------------
-function Run-RelativeScript {
-    param([string]$RelativePath)
+# Pfad zum PowerShell-Modul
+$ModulePath = Join-Path $Root "PowerShell\Logging.psm1"
 
-    try {
-        $FullPath = Join-Path $PSScriptRoot $RelativePath
-        $FullPath = (Resolve-Path $FullPath).Path
+# Modul laden
+$modulePath = "C:\Program Files\10020115_WinScripts\Scripte\Logging.psm1"
+Import-Module $modulePath -ErrorAction Stop
 
-        if (Test-Path $FullPath) {
-            Write-Log -Level INFO -Message "Starte Script: $FullPath"
-            powershell.exe -ExecutionPolicy Bypass -File $FullPath
+Initialize-Logger -Level "INFO"
+
+Write-Log -Level "INFO" -Message "WatchDog gestartet."
+Write-Log -Level "INFO" -Message "Arbeitsverzeichnis: $Root"
+
+
+# ------------------------------------------------------------
+# 1. ImportScript ausführen
+# ------------------------------------------------------------
+$ImportScript = Join-Path $Root "10020115_Win_S_ImportScript.ps1"
+
+if (Test-Path $ImportScript) {
+    Write-Log -Level "INFO" -Message "Starte ImportScript: $ImportScript"
+    powershell.exe -ExecutionPolicy Bypass -File $ImportScript -Wait
+    Write-Log -Level "INFO" -Message "ImportScript abgeschlossen."
+} else {
+    Write-Log -Level "ERROR" -Message "ImportScript nicht gefunden: $ImportScript"
+}
+
+
+# ------------------------------------------------------------
+# 2. Richtlinien-Skripte (10020115_Win_R_...) ausführen
+# ------------------------------------------------------------
+$RichtlinienPfad = Join-Path $Root "PowerShell\Richtlinien"
+Write-Log -Level "INFO" -Message "Suche Richtlinien-Skripte in: $RichtlinienPfad"
+
+$Richtlinien = Get-ChildItem -Path $RichtlinienPfad -Filter "10020115_Win_R_*.ps1"
+
+if ($Richtlinien.Count -gt 0) {
+    foreach ($Script in $Richtlinien) {
+        Write-Log -Level "INFO" -Message "Starte Richtlinien-Script: $($Script.FullName)"
+        try {
+            powershell.exe -ExecutionPolicy Bypass -File $Script.FullName -Wait
+            Write-Log -Level "INFO" -Message "Fertig: $($Script.Name)"
         }
-        else {
-            Write-Log -Level ERROR -Message "Script nicht gefunden: $FullPath"
+        catch {
+            Write-Log -Level "ERROR" -Message "Fehler in $($Script.Name): $_"
         }
     }
-    catch {
-        Write-Log -Level ERROR -Message "Fehler beim Ausführen von $RelativePath – $_"
-    }
+} else {
+    Write-Log -Level "WARN" -Message "Keine Richtlinien-Skripte gefunden."
 }
 
-# ---------------------------------------------------------
-# Hilfsfunktion: Registry-Werte prüfen
-# ---------------------------------------------------------
-function Test-PolicyValue {
-    param(
-        [string]$Path,
-        [string]$Name,
-        [object]$Expected
-    )
 
-    if (-not (Test-Path $Path)) {
-        Write-Log -Level WARN -Message "Pfad fehlt: $Path"
-        return $false
-    }
+# ------------------------------------------------------------
+# 3. Log-Script ausführen
+# ------------------------------------------------------------
+$LogScript = Join-Path $Root "PowerShell\Programme\10020115_Win_Log_Software.ps1"
 
-    $actual = (Get-ItemProperty -Path $Path -Name $Name -ErrorAction SilentlyContinue).$Name
-
-    if ($actual -ne $Expected) {
-        Write-Log -Level WARN -Message "Abweichung erkannt: $Path\$Name (Ist: $actual | Soll: $Expected)"
-        return $false
-    }
-
-    return $true
+if (Test-Path $LogScript) {
+    Write-Log -Level "INFO" -Message "Starte Log-Script: $LogScript"
+    powershell.exe -ExecutionPolicy Bypass -File $LogScript -Wait
+    Write-Log -Level "INFO" -Message "Log-Script abgeschlossen."
+} else {
+    Write-Log -Level "ERROR" -Message "Log-Script nicht gefunden: $LogScript"
 }
 
-# ---------------------------------------------------------
-# STARTUP-WATCHDOG
-# ---------------------------------------------------------
-Write-Log -Level INFO -Message "Starte Startup-Watchdog"
 
-Run-RelativeScript "..\Programme\10020115_Win_Log_Software.ps1"
-Run-RelativeScript "..\Update\10020115_Win_UpdateScript.ps1"
+# ------------------------------------------------------------
+# 4. ListApps-Script ausführen
+# ------------------------------------------------------------
+$ListApps = Join-Path $Root "PowerShell\InstallSoftware\10020115_Win_A_ListApps.ps1"
 
-Write-Log -Level INFO -Message "Startup-Watchdog abgeschlossen"
-
-# ---------------------------------------------------------
-# GPO-WATCHDOG
-# ---------------------------------------------------------
-Write-Log -Level INFO -Message "Starte GPO-Watchdog Prüfung"
-
-$Checks = @(
-    @{ Path="HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System"; Name="NoDispAppearancePage"; Expected=1 },
-    @{ Path="HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer"; Name="NoThemesTab"; Expected=1 },
-    @{ Path="HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\ActiveDesktop"; Name="NoChangingWallPaper"; Expected=1 },
-
-    @{ Path="HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\Uninstall"; Name="NoAddRemovePrograms"; Expected=1 },
-
-    @{ Path="HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization"; Name="NoChangingStartMenuBackground"; Expected=1 },
-
-    @{ Path="HKLM:\SOFTWARE\Policies\Microsoft\Windows\Installer"; Name="DisableMSI"; Expected=2 },
-
-    @{ Path="HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore"; Name="RemoveWindowsStore"; Expected=1 },
-
-    @{ Path="HKLM:\SOFTWARE\Policies\Microsoft\PassportForWork\PINComplexity"; Name="MinimumPINLength"; Expected=8 },
-    @{ Path="HKLM:\SOFTWARE\Policies\Microsoft\PassportForWork\PINComplexity"; Name="Digits"; Expected=1 },
-    @{ Path="HKLM:\SOFTWARE\Policies\Microsoft\PassportForWork\PINComplexity"; Name="LowercaseLetters"; Expected=1 },
-    @{ Path="HKLM:\SOFTWARE\Policies\Microsoft\PassportForWork\PINComplexity"; Name="UppercaseLetters"; Expected=1 },
-    @{ Path="HKLM:\SOFTWARE\Policies\Microsoft\PassportForWork\PINComplexity"; Name="SpecialCharacters"; Expected=1 },
-
-    @{ Path="HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\OEMInformation"; Name="Manufacturer"; Expected="DLRG-Jugend Andernach | EDV & Technik" },
-
-    @{ Path="HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"; Name="legalnoticecaption"; Expected="DLRG-Jugend Andernach – IT Sicherheitshinweis" }
-)
-
-$PolicyMismatch = $false
-
-foreach ($check in $Checks) {
-    if (-not (Test-PolicyValue @check)) {
-        $PolicyMismatch = $true
-    }
+if (Test-Path $ListApps) {
+    Write-Log -Level "INFO" -Message "Starte ListApps-Script: $ListApps"
+    powershell.exe -ExecutionPolicy Bypass -File $ListApps -Wait
+    Write-Log -Level "INFO" -Message "ListApps-Script abgeschlossen."
+} else {
+    Write-Log -Level "ERROR" -Message "ListApps-Script nicht gefunden: $ListApps"
 }
 
-if ($PolicyMismatch -eq $false) {
-    Write-Log -Level INFO -Message "Alle Richtlinien korrekt. Beende mit ExitCode 0."
-    exit 0
-}
 
-Write-Log -Level WARN -Message "Abweichungen erkannt - GPO-Skripte werden erneut ausgeführt."
-
-# ---------------------------------------------------------
-# GPO-Skripte erneut anwenden
-# ---------------------------------------------------------
-$ScriptFolder = "C:\Programme\PowerShellScripte\Richtlinien\"
-
-$Scripts = @(
-    "10020115_Win_R_SystemHilfe.ps1",
-    "10020115_Win_R_WinInstallStore.ps1",
-    "10020115_Win_R_SoftwareInstallUninstall.ps1",
-    "10020115_Win_R_Personalisierung.ps1",
-    "10020115_Win_R_Passwort.ps1",
-    "10020115_Win_R_DesktopMenue.ps1",
-    "10020115_Win_R_BackgroundDesign.ps1"
-)
-
-foreach ($script in $Scripts) {
-    $full = Join-Path $ScriptFolder $script
-    if (Test-Path $full) {
-        Write-Log -Level INFO -Message "Führe erneut aus: $script"
-        powershell.exe -ExecutionPolicy Bypass -File $full
-    } else {
-        Write-Log -Level ERROR -Message "Script fehlt: $full"
-    }
-}
-
-Write-Log -Level INFO -Message "GPO-Wiederherstellung abgeschlossen"
-exit 0
+# ------------------------------------------------------------
+# WatchDog Ende
+# ------------------------------------------------------------
+Write-Log -Level "INFO" -Message "WatchDog abgeschlossen."

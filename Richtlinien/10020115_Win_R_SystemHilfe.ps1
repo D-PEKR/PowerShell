@@ -1,6 +1,8 @@
+# Modul laden
 $modulePath = "C:\Program Files\10020115_WinScripts\Scripte\Logging.psm1"
-Import-Module $modulePath
-Initialize-Logger -FileName "GPO_OEM_and_LegalNotice"
+Import-Module $modulePath -ErrorAction Stop
+
+Initialize-Logger -Level "INFO"
 
 Write-Log -Level INFO -Message "Starte OEM-Branding & Legal Notice Konfiguration"
 
@@ -36,14 +38,8 @@ $RegLegal = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
 New-Item -Path $RegLegal -Force | Out-Null
 
 # Beispieltexte – bitte anpassen
-$LegalCaption = "DLRG-Jugend Andernach - IT Sicherheitshinweis"
-$LegalText = @"
-Dieses Gerät ist Eigentum der DLRG-Jugend Andernach.
-Unbefugte Nutzung ist untersagt und wird strafrechtlich verfolgt.
-
-Bei Problemen wenden Sie sich an:
-EDV & Technik - https://andernach.dlrg-jugend.de/edv-technik/
-"@
+$LegalCaption = ""
+$LegalText = ""
 
 Set-ItemProperty -Path $RegLegal -Name "legalnoticecaption" -Value $LegalCaption
 Set-ItemProperty -Path $RegLegal -Name "legalnoticetext" -Value $LegalText

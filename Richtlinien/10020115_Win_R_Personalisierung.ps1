@@ -1,8 +1,8 @@
-
+# Modul laden
 $modulePath = "C:\Program Files\10020115_WinScripts\Scripte\Logging.psm1"
+Import-Module $modulePath -ErrorAction Stop
 
-Import-Module $modulePath
-Initialize-Logger -FileName "GPO_User_Personalization"
+Initialize-Logger -Level "INFO"
 
 Write-Log -Level INFO -Message "Starte Benutzerkonfiguration - Personalisierung"
 

@@ -1,18 +1,24 @@
 # Quelle und Ziel definieren
-$Source = "C:\Programme\Zu\VerstecktemOrdner"
+$Source = "C:\Users\Win11ProTest\DLRG\DLRG OG Andernach Projekte-Jugendnotebooks - Jugendnotebooks\Win11_C\Software\Scripte"
 $Destination = "C:\Programme\10020115_WinScripts\"
 
-# Zielordner erstellen, falls nicht vorhanden
-if (!(Test-Path $Destination)) {
-    New-Item -ItemType Directory -Path $Destination | Out-Null
+# Zielordner löschen, falls vorhanden
+if (Test-Path $Destination) {
+    Write-Host "Lösche vorhandenen Zielordner..."
+    Remove-Item -Path $Destination -Recurse -Force
 }
 
-# Ordner rekursiv kopieren – auch versteckte Dateien
+# Zielordner neu erstellen
+Write-Host "Erstelle Zielordner..."
+New-Item -ItemType Directory -Path $Destination | Out-Null
+
+# Ordner rekursiv kopieren – inklusive versteckter Dateien
+Write-Host "Kopiere Dateien..."
 Copy-Item -Path $Source -Destination $Destination -Recurse -Force
 
 # Alle Dateien und Ordner im Ziel sichtbar machen
+Write-Host "Entferne versteckte Attribute..."
 Get-ChildItem -Path $Destination -Recurse -Force | ForEach-Object {
-    # Attribute "Hidden" und "System" entfernen
     $_.Attributes = 'Normal'
 }
 
