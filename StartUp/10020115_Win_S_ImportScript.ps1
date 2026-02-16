@@ -1,6 +1,6 @@
 # Quelle und Ziel definieren
-$Source = "C:\Users\Win11ProTest\DLRG\DLRG OG Andernach Projekte-Jugendnotebooks - Jugendnotebooks\Win11_C\Software\Scripte"
-$Destination = "C:\Programme\10020115_WinScripts\"
+$Source = "C:\Users\Win11ProTest\DLRG\DLRG OG Andernach Projekte-Jugendnotebooks - Jugendnotebooks\Win11_C"
+$Destination = "C:\Program Files\10020115_WinScripts\"
 
 # Zielordner löschen, falls vorhanden
 if (Test-Path $Destination) {

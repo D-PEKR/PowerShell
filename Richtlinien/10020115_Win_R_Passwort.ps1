@@ -1,5 +1,5 @@
 # Modul laden
-$modulePath = "C:\Program Files\10020115_WinScripts\Scripte\Logging.psm1"
+$modulePath = "C:\Program Files\10020115_WinScripts\Win11_C\Software\Scripte\Logging.psm1"
 Import-Module $modulePath -ErrorAction Stop
 
 Initialize-Logger -Level "INFO"
