@@ -1,5 +1,58 @@
-$Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ExecutionPolicy Bypass -File C:\Programme\10020115_WinScripts\StartUp\10020115_Win_S_WatchdogGPO.ps1"
-$Trigger = New-ScheduledTaskTrigger -AtStartup
-$Principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest
+# Task löschen, falls vorhanden
+if (Get-ScheduledTask -TaskName "GPO-Watchdog" -ErrorAction SilentlyContinue) {
+    Unregister-ScheduledTask -TaskName "GPO-Watchdog" -Confirm:$false
+}
 
+# Aktion: PowerShell unsichtbar starten
+$Action = New-ScheduledTaskAction `
+    -Execute "powershell.exe" `
+    -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"`"C:\Program Files\10020115_WinScripts\10020115_Win_S_WatchdogGPO.ps1`"`""
+
+# Trigger: Beim Logon + 2 Minuten Verzögerung
+$Trigger = New-ScheduledTaskTrigger -AtLogOn
+$Trigger.Delay = "PT2M"   # 2 Minuten
+
+# Principal: aktueller Benutzer
+$CurrentUser = "$env:USERDOMAIN\$env:USERNAME"
+$Principal = New-ScheduledTaskPrincipal `
+    -UserId $CurrentUser `
+    -RunLevel Highest
+
+# Task registrieren
 Register-ScheduledTask -TaskName "GPO-Watchdog" -Action $Action -Trigger $Trigger -Principal $Principal
+
+
+# ---------------------------------------------------------
+
+
+# Pfad zum Run-Key
+$RunKeyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+
+# Name des Eintrags
+$EntryName = "GPOWatchdog"
+
+# PowerShell-Befehl mit 2 Minuten Delay
+$EntryValue = 'powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -Command "Start-Sleep -Seconds 120; & ''C:\Program Files\10020115_WinScripts\10020115_Win_S_WatchdogGPO.ps1''"'
+
+# Prüfen, ob der Eintrag existiert
+try {
+    $existing = Get-ItemProperty -Path $RunKeyPath -Name $EntryName -ErrorAction Stop
+} catch {
+    $existing = $null
+}
+
+if ($existing) {
+    if ($existing.$EntryName -eq $EntryValue) {
+        Write-Output "Eintrag '$EntryName' existiert bereits und ist korrekt."
+    }
+    else {
+        # Eintrag aktualisieren
+        Set-ItemProperty -Path $RunKeyPath -Name $EntryName -Value $EntryValue
+        Write-Output "Eintrag '$EntryName' wurde aktualisiert."
+    }
+}
+else {
+    # Eintrag neu erstellen
+    New-ItemProperty -Path $RunKeyPath -Name $EntryName -Value $EntryValue -PropertyType String | Out-Null
+    Write-Output "Eintrag '$EntryName' wurde erstellt."
+}

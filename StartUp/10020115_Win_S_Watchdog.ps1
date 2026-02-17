@@ -1,19 +1,111 @@
 # ---------------------------------------------------------
+# LOGGER – direkt integriert
+# ---------------------------------------------------------
+
+# Globale Variablen
+$Global:LogFilePath = $null
+$Global:LogLevel = "INFO"
+$Global:EnableConsoleOutput = $true
+$Global:MaxLogSizeMB = 5
+$Global:DefaultLogFolder = "C:\Programme\LoggingFiles\"
+
+function Initialize-Logger {
+    param(
+        [string]$FileName = "Watchdog_$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss').log",
+
+        [ValidateSet("DEBUG","INFO","WARN","ERROR")]
+        [string]$Level = "INFO",
+
+        [bool]$ConsoleOutput = $true,
+
+        [int]$MaxSizeMB = 5
+    )
+
+    if (-not (Test-Path $Global:DefaultLogFolder)) {
+        New-Item -Path $Global:DefaultLogFolder -ItemType Directory -Force | Out-Null
+    }
+
+    $Path = Join-Path $Global:DefaultLogFolder $FileName
+
+    if (-not (Test-Path $Path)) {
+        New-Item -Path $Path -ItemType File -Force | Out-Null
+    }
+
+    $Global:LogFilePath = $Path
+    $Global:LogLevel = $Level
+    $Global:EnableConsoleOutput = $ConsoleOutput
+    $Global:MaxLogSizeMB = $MaxSizeMB
+
+    Write-Log -Level "INFO" -Message "Logger initialisiert. Logfile: $Path"
+}
+
+function Rotate-Log {
+    if (-not (Test-Path $LogFilePath)) { return }
+
+    $sizeMB = (Get-Item $LogFilePath).Length / 1MB
+
+    if ($sizeMB -ge $Global:MaxLogSizeMB) {
+        $timestamp = (Get-Date -Format "yyyyMMdd_HHmmss")
+        $archivePath = "$LogFilePath.$timestamp.bak"
+
+        Move-Item -Path $LogFilePath -Destination $archivePath -Force
+        New-Item -Path $LogFilePath -ItemType File -Force | Out-Null
+    }
+}
+
+function Write-Log {
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet("DEBUG","INFO","WARN","ERROR")]
+        [string]$Level,
+
+        [Parameter(Mandatory)]
+        [string]$Message
+    )
+
+    $levels = @{ DEBUG = 1; INFO = 2; WARN = 3; ERROR = 4 }
+    if ($levels[$Level] -lt $levels[$Global:LogLevel]) {
+        return
+    }
+
+    Rotate-Log
+
+    $timestamp = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+    $entry = "[$timestamp] [$Level] $Message"
+
+    Add-Content -Path $Global:LogFilePath -Value $entry
+
+    if ($Global:EnableConsoleOutput) {
+        switch ($Level) {
+            "ERROR" { Write-Host $entry -ForegroundColor Red }
+            "WARN"  { Write-Host $entry -ForegroundColor Yellow }
+            "INFO"  { Write-Host $entry -ForegroundColor Cyan }
+            "DEBUG" { Write-Host $entry -ForegroundColor DarkGray }
+        }
+    }
+}
+
+function Get-LogConfig {
+    [PSCustomObject]@{
+        LogFilePath     = $Global:LogFilePath
+        LogLevel        = $Global:LogLevel
+        ConsoleOutput   = $Global:EnableConsoleOutput
+        MaxLogSizeMB    = $Global:MaxLogSizeMB
+        DefaultFolder   = $Global:DefaultLogFolder
+    }
+}
+
+# ---------------------------------------------------------
 # Logger initialisieren
 # ---------------------------------------------------------
-$modulePath = "C:\Program Files\10020115_WinScripts\Win11_C\Software\Scripte\Logging.psm1"
-Import-Module $modulePath -ErrorAction Stop
-
 Initialize-Logger -Level "INFO"
-
 Write-Log -Level INFO -Message "Starte kombinierten Import- und WatchDog-Prozess."
-
 
 # ---------------------------------------------------------
 # 1. IMPORT-SCHRITT
 # ---------------------------------------------------------
 
-$Source = "C:\Users\Win11ProTest\DLRG\DLRG OG Andernach Projekte-Jugendnotebooks - Jugendnotebooks\Win11_C"
+$Source = "C:\Users\DLRG-JugendAndernach\DLRG\DLRG OG Andernach Projekte-Jugendnotebooks - Jugendnotebooks\Win11_C"
 $DestinationRoot = "C:\Program Files\10020115_WinScripts"
 $Destination = Join-Path $DestinationRoot "Win11_C"
 
@@ -21,30 +113,25 @@ Write-Log -Level INFO -Message "Starte Kopiervorgang für Win11_C"
 Write-Log -Level INFO -Message "Quelle: $Source"
 Write-Log -Level INFO -Message "Ziel: $Destination"
 
-# Offline-Attribute entfernen
 Write-Log -Level INFO -Message "Entferne mögliche Offline-Attribute aus Quelldateien..."
 Get-ChildItem $Source -Recurse -Force | ForEach-Object {
     attrib -P $_.FullName 2>$null
 }
 
-# Zielordner löschen
 if (Test-Path $Destination) {
     Write-Log -Level INFO -Message "Lösche vorhandenen Ordner Win11_C..."
     Remove-Item -Path $Destination -Recurse -Force
     Start-Sleep -Milliseconds 300
 } else {
-    Write-Log -Level INFO -Message "Ordner Win11_C existiert nicht – kein Löschen notwendig."
+    Write-Log -Level INFO -Message "Ordner Win11_C existiert nicht, kein Löschen notwendig."
 }
 
-# Zielordner neu erstellen
 Write-Log -Level INFO -Message "Erstelle Zielordner Win11_C..."
 New-Item -ItemType Directory -Path $Destination -Force | Out-Null
 
-# Dateien kopieren
 Write-Log -Level INFO -Message "Kopiere Dateien nach Win11_C..."
-Copy-Item -Path $Source -Destination $Destination -Recurse -Force
+Copy-Item -Path "$Source\*" -Destination $Destination -Recurse -Force
 
-# Attribute normalisieren
 Write-Log -Level INFO -Message "Entferne versteckte Attribute..."
 Get-ChildItem -Path $Destination -Recurse -Force | ForEach-Object {
     $_.Attributes = 'Normal'
@@ -53,13 +140,11 @@ Get-ChildItem -Path $Destination -Recurse -Force | ForEach-Object {
 
 Write-Log -Level INFO -Message "Kopiervorgang abgeschlossen."
 
-
 # ---------------------------------------------------------
 # 2. WARTEN (60 Sekunden)
 # ---------------------------------------------------------
 Write-Log -Level INFO -Message "Warte 60 Sekunden, bevor WatchDog startet..."
 Start-Sleep -Seconds 60
-
 
 # ---------------------------------------------------------
 # 3. WATCHDOG – Skripte rekursiv ausführen
@@ -70,8 +155,11 @@ Write-Log -Level INFO -Message "WatchDog gestartet."
 $ScriptRoot = "C:\Program Files\10020115_WinScripts\Win11_C\Software\Scripte"
 Write-Log -Level INFO -Message "Suche nach Skripten in: $ScriptRoot"
 
-# Alle PS1-Dateien rekursiv suchen
-$Scripts = Get-ChildItem -Path $ScriptRoot -Filter "*.ps1" -Recurse
+# Datei explizit ausschließen
+$ExcludeFile = "C:\Program Files\10020115_WinScripts\Win11_C\Software\Scripte\StartUp\10020115_Win_S_Watchdog.ps1"
+
+$Scripts = Get-ChildItem -Path $ScriptRoot -Filter "*.ps1" -Recurse |
+    Where-Object { $_.FullName -ne $ExcludeFile }
 
 if ($Scripts.Count -gt 0) {
     foreach ($Script in $Scripts) {
