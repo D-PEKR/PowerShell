@@ -1,58 +1,61 @@
-# Task löschen, falls vorhanden
-if (Get-ScheduledTask -TaskName "GPO-Watchdog" -ErrorAction SilentlyContinue) {
-    Unregister-ScheduledTask -TaskName "GPO-Watchdog" -Confirm:$false
-}
+# Setup-GPOWatchdog.ps1
+# Dieses Skript muss im interaktiven Benutzerkontext ausgeführt werden (NICHT "Als Administrator ausführen").
 
-# Aktion: PowerShell unsichtbar starten
-$Action = New-ScheduledTaskAction `
-    -Execute "powershell.exe" `
-    -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"`"C:\Program Files\10020115_WinScripts\10020115_Win_S_WatchdogGPO.ps1`"`""
-
-# Trigger: Beim Logon + 2 Minuten Verzögerung
-$Trigger = New-ScheduledTaskTrigger -AtLogOn
-$Trigger.Delay = "PT2M"   # 2 Minuten
-
-# Principal: aktueller Benutzer
-$CurrentUser = "$env:USERDOMAIN\$env:USERNAME"
-$Principal = New-ScheduledTaskPrincipal `
-    -UserId $CurrentUser `
-    -RunLevel Highest
-
-# Task registrieren
-Register-ScheduledTask -TaskName "GPO-Watchdog" -Action $Action -Trigger $Trigger -Principal $Principal
-
-
-# ---------------------------------------------------------
-
-
-# Pfad zum Run-Key
+# Konfiguration
+$TaskName = "GPO-Watchdog"
+$ScriptPath = "C:\Users\Public\10020115_WinScripts\10020115_Win_S_Watchdog.ps1"
 $RunKeyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+$RunKeyName = "GPOWatchdogStarter"
+$RunKeyValue = "schtasks.exe /run /tn `"$TaskName`""
 
-# Name des Eintrags
-$EntryName = "GPOWatchdog"
+# 0) Prüfen, ob wir im erwarteten Benutzerkontext laufen
+$expectedUser = "$env:COMPUTERNAME\DLRG-JugendAndernach"
+$currentUser = (Get-WmiObject Win32_ComputerSystem).UserName
 
-# PowerShell-Befehl mit 2 Minuten Delay
-$EntryValue = 'powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -Command "Start-Sleep -Seconds 120; & ''C:\Program Files\10020115_WinScripts\10020115_Win_S_WatchdogGPO.ps1''"'
+Write-Host "Erwarteter Benutzer: $expectedUser"
+Write-Host "Aktueller Benutzer:  $currentUser"
 
-# Prüfen, ob der Eintrag existiert
+if ($currentUser -ne $expectedUser) {
+    Write-Host ""
+    Write-Host "FEHLER: Dieses Skript muss als der Benutzer '$expectedUser' ausgeführt werden."
+    Write-Host "Bitte PowerShell normal (nicht erhöht) öffnen und das Skript erneut starten."
+    exit 1
+}
+
+# 1) Alte Aufgabe entfernen (falls vorhanden)
+if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
+    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+    Write-Host "Vorhandene Aufgabe entfernt."
+}
+
+# 2) Aufgabe erstellen (ohne Trigger; wird per RunKey gestartet)
+$action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ScriptPath`""
+
+# Principal: explizit der interaktive Benutzer
+$principal = New-ScheduledTaskPrincipal -UserId $currentUser -RunLevel Highest
+
 try {
-    $existing = Get-ItemProperty -Path $RunKeyPath -Name $EntryName -ErrorAction Stop
+    Register-ScheduledTask -TaskName $TaskName -Action $action -Principal $principal -ErrorAction Stop
+    Write-Host "Aufgabe '$TaskName' erfolgreich registriert unter Principal: $currentUser"
 } catch {
-    $existing = $null
+    Write-Host "FEHLER beim Registrieren der Aufgabe: $_"
+    exit 2
 }
 
-if ($existing) {
-    if ($existing.$EntryName -eq $EntryValue) {
-        Write-Output "Eintrag '$EntryName' existiert bereits und ist korrekt."
-    }
-    else {
-        # Eintrag aktualisieren
-        Set-ItemProperty -Path $RunKeyPath -Name $EntryName -Value $EntryValue
-        Write-Output "Eintrag '$EntryName' wurde aktualisiert."
-    }
+# 3) Run-Key setzen (Startet die Aufgabe beim Logon)
+if (Get-ItemProperty -Path $RunKeyPath -Name $RunKeyName -ErrorAction SilentlyContinue) {
+    Set-ItemProperty -Path $RunKeyPath -Name $RunKeyName -Value $RunKeyValue
+    Write-Host "Run-Key aktualisiert."
+} else {
+    New-ItemProperty -Path $RunKeyPath -Name $RunKeyName -Value $RunKeyValue -PropertyType String | Out-Null
+    Write-Host "Run-Key erstellt."
 }
-else {
-    # Eintrag neu erstellen
-    New-ItemProperty -Path $RunKeyPath -Name $EntryName -Value $EntryValue -PropertyType String | Out-Null
-    Write-Output "Eintrag '$EntryName' wurde erstellt."
-}
+
+# 4) Kontrolle: Task anzeigen
+Start-Sleep -Seconds 1
+Get-ScheduledTask -TaskName $TaskName | Select-Object TaskName, @{Name='Principal';Expression={$_.Principal.UserId}} | Format-List
+
+Write-Host "Setup abgeschlossen."
+
+# Zum testen
+# Get-ScheduledTask -TaskName "GPO-Watchdog" | Select-Object TaskName, @{Name='Principal';Expression={$_.Principal.UserId}}

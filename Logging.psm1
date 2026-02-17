@@ -3,7 +3,7 @@ $Global:LogFilePath = $null
 $Global:LogLevel = "INFO"
 $Global:EnableConsoleOutput = $true
 $Global:MaxLogSizeMB = 5
-$Global:DefaultLogFolder = "C:\Programme\LoggingFiles\"
+$Global:DefaultLogFolder = "C:\Users\Public\10020115_WinScripts\Logs"
 
 function Initialize-Logger {
     param(

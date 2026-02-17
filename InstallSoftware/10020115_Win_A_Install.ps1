@@ -1,64 +1,122 @@
-# Modul laden
-$modulePath = "C:\Program Files\10020115_WinScripts\Win11_C\Software\Scripte\Logging.psm1"
+# ---------------------------------------------------------
+# GLOBAL ERROR HANDLING – ALLE FEHLER AUTOMATISCH INS LOG
+# ---------------------------------------------------------
+
+# Alle Fehler als "terminierend" behandeln
+$ErrorActionPreference = "Stop"
+$Global:PSDefaultParameterValues['*:ErrorAction'] = 'Stop'
+
+# Globaler Fehler-Logger
+Register-EngineEvent PowerShell.OnScriptError -Action {
+    $msg = $_.SourceArgs[0].Exception.Message
+    Write-Log -Level "ERROR" -Message "PowerShell-Fehler: $msg"
+} | Out-Null
+
+
+# ---------------------------------------------------------
+# Modul laden & Logging starten
+# ---------------------------------------------------------
+
+$modulePath = "C:\Users\Public\10020115_WinScripts\Win11_C\Software\Scripte\Logging.psm1"
 Import-Module $modulePath -ErrorAction Stop
 
-Initialize-Logger -Level "Install Software"
+Initialize-Logger -Level "INFO"
+Write-Log -Level INFO -Message "=== Software-Inventur gestartet ==="
 
-function Install-MSI {
-    param(
-        [Parameter(Mandatory=$true)]
-        [string]$Path,
 
-        [string]$Arguments = "/qn /norestart"
-    )
+# ---------------------------------------------------------
+# Registry-Pfade für klassische Programme
+# ---------------------------------------------------------
 
-    if (-not (Test-Path $Path)) {
-        Write-Log -Level "ERROR" -Message "MSI-Datei nicht gefunden: $Path"
-        return
-    }
+$classicPaths = @(
+    "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall",
+    "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
+)
 
-    Write-Log -Level "INFO" -Message "Starte Installation: $Path"
+
+# ---------------------------------------------------------
+# Funktion: Klassische Programme aus Registry lesen
+# ---------------------------------------------------------
+
+function Get-InstalledPrograms {
+    param([string]$RegistryPath)
 
     try {
-        Start-Process "msiexec.exe" -ArgumentList "/i `"$Path`" $Arguments" -Wait -ErrorAction Stop
-        Write-Log -Level "INFO" -Message "Installation erfolgreich abgeschlossen: $Path"
+        if (Test-Path $RegistryPath) {
+            Get-ChildItem $RegistryPath | ForEach-Object {
+                try {
+                    $props = Get-ItemProperty $_.PsPath
+                    if ($props.DisplayName) {
+                        [PSCustomObject]@{
+                            Name        = $props.DisplayName
+                            Version     = $props.DisplayVersion
+                            Publisher   = $props.Publisher
+                            InstallDate = $props.InstallDate
+                        }
+                    }
+                }
+                catch {
+                    Write-Log -Level ERROR -Message "Fehler beim Lesen eines Registry-Eintrags: $($_.Exception.Message)"
+                }
+            }
+        }
+        else {
+            Write-Log -Level WARN -Message "Registry-Pfad nicht gefunden: $RegistryPath"
+        }
     }
     catch {
-        Write-Log -Level "ERROR" -Message "Fehler bei Installation von $Path: $($_.Exception.Message)"
+        Write-Log -Level ERROR -Message "Fehler beim Auslesen des Registry-Pfads $RegistryPath: $($_.Exception.Message)"
     }
 }
 
-# Funktion: Uninstall-MSI (mit Logging)
 
-function Uninstall-MSI {
-    param(
-        [Parameter(Mandatory=$true)]
-        [string]$ProductCode,
+# ---------------------------------------------------------
+# KLASSISCHE PROGRAMME
+# ---------------------------------------------------------
 
-        [string]$Arguments = "/qn /norestart"
-    )
+Write-Log -Level INFO -Message "=== Klassische Programme ==="
 
-    Write-Log -Level "INFO" -Message "Starte Deinstallation: $ProductCode"
-
-    try {
-        Start-Process "msiexec.exe" -ArgumentList "/x $ProductCode $Arguments" -Wait -ErrorAction Stop
-        Write-Log -Level "INFO" -Message "Deinstallation erfolgreich abgeschlossen: $ProductCode"
+try {
+    $classicApps = foreach ($path in $classicPaths) {
+        Get-InstalledPrograms -RegistryPath $path
     }
-    catch {
-        Write-Log -Level "ERROR" -Message "Fehler bei Deinstallation von $ProductCode: $($_.Exception.Message)"
+
+    if (-not $classicApps -or $classicApps.Count -eq 0) {
+        Write-Log -Level WARN -Message "Keine klassischen Programme gefunden."
+    }
+    else {
+        foreach ($app in $classicApps | Sort-Object Name) {
+            Write-Log -Level INFO -Message "Programm: $($app.Name) | Version: $($app.Version) | Publisher: $($app.Publisher)"
+        }
     }
 }
+catch {
+    Write-Log -Level ERROR -Message "Fehler beim Auslesen klassischer Programme: $($_.Exception.Message)"
+}
 
-# ------------------------------------------------------------
-# Beispiel: Installation
-# ------------------------------------------------------------
-Install-MSI -Path "C:\Install\7zip.msi"
-Install-MSI -Path "C:\Install\VLC.msi"
 
-# ------------------------------------------------------------
-# Beispiel: Deinstallation
-# ------------------------------------------------------------
-# Beispiel-GUID
-# {23170F69-40C1-2702-0920-000001000000}
+# ---------------------------------------------------------
+# UWP / STORE APPS
+# ---------------------------------------------------------
 
-Uninstall-MSI -ProductCode "{23170F69-40C1-2702-0920-000001000000}"
+Write-Log -Level INFO -Message "=== UWP / Store Apps ==="
+
+try {
+    $uwpApps = Get-AppxPackage |
+        Select-Object Name, Version, Publisher |
+        Sort-Object Name
+
+    foreach ($app in $uwpApps) {
+        Write-Log -Level INFO -Message "UWP-App: $($app.Name) | Version: $($app.Version) | Publisher: $($app.Publisher)"
+    }
+}
+catch {
+    Write-Log -Level ERROR -Message "Fehler beim Auslesen der UWP-Apps: $($_.Exception.Message)"
+}
+
+
+# ---------------------------------------------------------
+# FERTIG
+# ---------------------------------------------------------
+
+Write-Log -Level INFO -Message "=== Software-Inventur abgeschlossen ==="

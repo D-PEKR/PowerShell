@@ -3,9 +3,32 @@ param(
     [string]$LOGFILE
 )
 
+# ---------------------------------------------------------
+# GLOBAL ERROR HANDLING
+# ---------------------------------------------------------
+
+# Alle Fehler als "terminierend" behandeln
+$ErrorActionPreference = "Stop"
+$Global:PSDefaultParameterValues['*:ErrorAction'] = 'Stop'
+
+# Globaler Fehler-Logger
+Register-EngineEvent PowerShell.OnScriptError -Action {
+    $msg = $_.SourceArgs[0].Exception.Message
+    Write-Log -Level "ERROR" -Message "PowerShell-Fehler: $msg"
+} | Out-Null
+
+
+# ---------------------------------------------------------
 # Logging-Modul importieren
-$modulePath = Join-Path -Path $PSScriptRoot -ChildPath "..\Logging.psm1"
+# ---------------------------------------------------------
+
+$modulePath = "C:\Users\Public\10020115_WinScripts\Win11_C\Software\Scripte\Logging.psm1"
 Import-Module $modulePath
+
+
+# ---------------------------------------------------------
+# Hintergrundmodus starten
+# ---------------------------------------------------------
 
 if (-not $RUN_IN_BACKGROUND) {
 
@@ -18,7 +41,6 @@ if (-not $RUN_IN_BACKGROUND) {
 
     $scriptPath = $MyInvocation.MyCommand.Path
 
-    # Hintergrundprozess starten (Parameter, keine Environment-Variablen)
     Start-Process powershell.exe `
         -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" -RUN_IN_BACKGROUND -LOGFILE `"$logFileName`"" `
         -WindowStyle Hidden
@@ -27,6 +49,10 @@ if (-not $RUN_IN_BACKGROUND) {
     exit
 }
 
+# ---------------------------------------------------------
+# Hintergrundmodus – Logger initialisieren
+# ---------------------------------------------------------
+
 if (-not $LOGFILE) {
     throw "Fehler: LOGFILE wurde nicht übergeben."
 }
@@ -34,30 +60,49 @@ if (-not $LOGFILE) {
 Initialize-Logger -FileName $LOGFILE -Level "INFO" -ConsoleOutput $true -MaxSizeMB 5
 Write-Log -Level INFO -Message "Update-Skript gestartet (Hintergrundmodus)."
 
+
+# ---------------------------------------------------------
 # ExecutionPolicy setzen
+# ---------------------------------------------------------
+
 Set-ExecutionPolicy Bypass -Scope Process -Force
 Set-ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
+
+
+# ---------------------------------------------------------
+# PSWindowsUpdate installieren (falls nötig)
+# ---------------------------------------------------------
 
 if (-not (Get-Module -ListAvailable -Name PSWindowsUpdate)) {
     Write-Log -Level INFO -Message "PSWindowsUpdate wird installiert..."
 
     try {
-        Install-PackageProvider -Name NuGet -Force -ErrorAction SilentlyContinue
-        Install-Module -Name PSWindowsUpdate -Force -ErrorAction Stop
+        Install-PackageProvider -Name NuGet -Force
+        Install-Module -Name PSWindowsUpdate -Force
         Write-Log -Level INFO -Message "PSWindowsUpdate erfolgreich installiert."
     }
     catch {
-        Write-Log -Level ERROR -Message "Fehler bei der Installation von PSWindowsUpdate: $_"
+        Write-Log -Level ERROR -Message "Fehler bei der Installation von PSWindowsUpdate: $($_.Exception.Message)"
         exit 1
     }
 }
 
 Import-Module PSWindowsUpdate
 
+
+# ---------------------------------------------------------
+# Windows Updates suchen
+# ---------------------------------------------------------
+
 Write-Log -Level INFO -Message "Suche nach Windows Updates..."
 
-$windowsUpdates = Get-WindowsUpdate -MicrosoftUpdate -AcceptAll -ErrorAction SilentlyContinue |
-Where-Object { $_.UpdateType -ne "Driver" }
+try {
+    $windowsUpdates = Get-WindowsUpdate -MicrosoftUpdate -AcceptAll |
+        Where-Object { $_.UpdateType -ne "Driver" }
+}
+catch {
+    Write-Log -Level ERROR -Message "Fehler beim Abrufen der Windows Updates: $($_.Exception.Message)"
+}
 
 if (-not $windowsUpdates) {
     Write-Log -Level INFO -Message "Keine Windows Updates gefunden."
@@ -69,10 +114,20 @@ else {
     }
 }
 
+
+# ---------------------------------------------------------
+# Treiberupdates suchen
+# ---------------------------------------------------------
+
 Write-Log -Level INFO -Message "Suche nach Treiberupdates..."
 
-$driverUpdates = Get-WindowsUpdate -MicrosoftUpdate -AcceptAll -ErrorAction SilentlyContinue |
-Where-Object { $_.UpdateType -eq "Driver" }
+try {
+    $driverUpdates = Get-WindowsUpdate -MicrosoftUpdate -AcceptAll |
+        Where-Object { $_.UpdateType -eq "Driver" }
+}
+catch {
+    Write-Log -Level ERROR -Message "Fehler beim Abrufen der Treiberupdates: $($_.Exception.Message)"
+}
 
 if (-not $driverUpdates) {
     Write-Log -Level INFO -Message "Keine Treiberupdates gefunden."
@@ -84,11 +139,16 @@ else {
     }
 }
 
+
+# ---------------------------------------------------------
+# Updates installieren
+# ---------------------------------------------------------
+
 if ($windowsUpdates -or $driverUpdates) {
     Write-Log -Level INFO -Message "Installiere Updates (Windows + Treiber)..."
 
     try {
-        $results = Install-WindowsUpdate -MicrosoftUpdate -AcceptAll -IgnoreReboot -ErrorAction SilentlyContinue
+        $results = Install-WindowsUpdate -MicrosoftUpdate -AcceptAll -IgnoreReboot
 
         foreach ($res in $results) {
             $msg = "Update: $($res.Title) | Result: $($res.Result)"
@@ -100,19 +160,23 @@ if ($windowsUpdates -or $driverUpdates) {
                 $msg += " | ExitCode: (nicht verfügbar)"
             }
 
-
             Write-Log -Level INFO -Message $msg
         }
 
         Write-Log -Level INFO -Message "Updates abgeschlossen."
     }
     catch {
-        Write-Log -Level ERROR -Message "Fehler bei der Installation der Updates: $_"
+        Write-Log -Level ERROR -Message "Fehler bei der Installation der Updates: $($_.Exception.Message)"
     }
 }
 else {
     Write-Log -Level INFO -Message "Keine Updates zur Installation vorhanden."
 }
+
+
+# ---------------------------------------------------------
+# Treiberupdates aktivieren
+# ---------------------------------------------------------
 
 try {
     Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching" `
@@ -121,15 +185,19 @@ try {
     Write-Log -Level INFO -Message "Treiberupdates aktiviert."
 }
 catch {
-    Write-Log -Level ERROR -Message "Fehler beim Aktivieren der Treiberupdates: $_"
+    Write-Log -Level ERROR -Message "Fehler beim Aktivieren der Treiberupdates: $($_.Exception.Message)"
 }
+
+
+# ---------------------------------------------------------
+# Winget Updates
+# ---------------------------------------------------------
 
 Write-Log -Level INFO -Message "Starte Software-Updates über Winget..."
 
 try {
     winget source update | Out-Null
 
-    # Upgrade-Liste als JSON abrufen
     $upgradeListJson = cmd /c "set LANG=en-US && winget upgrade --accept-source-agreements --accept-package-agreements --output json"
     $upgradeList = $upgradeListJson | ConvertFrom-Json
 
@@ -142,13 +210,17 @@ try {
         Write-Log -Level INFO -Message "Keine Software-Updates verfügbar."
     }
 
-    # Updates installieren
     winget upgrade --all --silent --accept-package-agreements --accept-source-agreements | Out-Null
 
     Write-Log -Level INFO -Message "Software-Updates abgeschlossen."
 }
 catch {
-    Write-Log -Level ERROR -Message "Fehler bei Winget-Updates: $_"
+    Write-Log -Level ERROR -Message "Fehler bei Winget-Updates: $($_.Exception.Message)"
 }
+
+
+# ---------------------------------------------------------
+# Fertig
+# ---------------------------------------------------------
 
 Write-Log -Level INFO -Message "Update-Skript erfolgreich beendet."

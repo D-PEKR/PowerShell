@@ -1,4 +1,18 @@
 # ---------------------------------------------------------
+# GLOBAL ERROR HANDLING
+# ---------------------------------------------------------
+
+$ErrorActionPreference = "Stop"
+$Global:PSDefaultParameterValues['*:ErrorAction'] = 'Stop'
+
+# Globaler Fehler-Logger
+Register-EngineEvent PowerShell.OnScriptError -Action {
+    $msg = $_.SourceArgs[0].Exception.Message
+    Write-Log -Level "ERROR" -Message "PowerShell-Fehler: $msg"
+} | Out-Null
+
+
+# ---------------------------------------------------------
 # LOGGER – direkt integriert
 # ---------------------------------------------------------
 
@@ -7,11 +21,11 @@ $Global:LogFilePath = $null
 $Global:LogLevel = "INFO"
 $Global:EnableConsoleOutput = $true
 $Global:MaxLogSizeMB = 5
-$Global:DefaultLogFolder = "C:\Programme\LoggingFiles\"
+$Global:DefaultLogFolder = "C:\Users\Public\10020115_WinScripts\Logs\"
 
 function Initialize-Logger {
     param(
-        [string]$FileName = "Watchdog_$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss').log",
+        [string]$FileName = "log_$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss').log",
 
         [ValidateSet("DEBUG","INFO","WARN","ERROR")]
         [string]$Level = "INFO",
@@ -105,40 +119,43 @@ Write-Log -Level INFO -Message "Starte kombinierten Import- und WatchDog-Prozess
 # 1. IMPORT-SCHRITT
 # ---------------------------------------------------------
 
-$Source = "C:\Users\DLRG-JugendAndernach\DLRG\DLRG OG Andernach Projekte-Jugendnotebooks - Jugendnotebooks\Win11_C"
-$DestinationRoot = "C:\Program Files\10020115_WinScripts"
-$Destination = Join-Path $DestinationRoot "Win11_C"
+try {
+    $Source = "C:\Users\DLRG-JugendAndernach\DLRG\DLRG OG Andernach Projekte-Jugendnotebooks - Jugendnotebooks\Win11_C"
+    $DestinationRoot = "C:\Users\Public\10020115_WinScripts"
+    $Destination = Join-Path $DestinationRoot "Win11_C"
 
-Write-Log -Level INFO -Message "Starte Kopiervorgang für Win11_C"
-Write-Log -Level INFO -Message "Quelle: $Source"
-Write-Log -Level INFO -Message "Ziel: $Destination"
+    Write-Log -Level INFO -Message "Starte Kopiervorgang für Win11_C"
+    Write-Log -Level INFO -Message "Quelle: $Source"
+    Write-Log -Level INFO -Message "Ziel: $Destination"
 
-Write-Log -Level INFO -Message "Entferne mögliche Offline-Attribute aus Quelldateien..."
-Get-ChildItem $Source -Recurse -Force | ForEach-Object {
-    attrib -P $_.FullName 2>$null
+    Write-Log -Level INFO -Message "Entferne mögliche Offline-Attribute aus Quelldateien..."
+    Get-ChildItem $Source -Recurse -Force | ForEach-Object {
+        attrib -P $_.FullName 2>$null
+    }
+
+    if (Test-Path $Destination) {
+        Write-Log -Level INFO -Message "Lösche vorhandenen Ordner Win11_C..."
+        Remove-Item -Path $Destination -Recurse -Force
+        Start-Sleep -Milliseconds 300
+    }
+
+    Write-Log -Level INFO -Message "Erstelle Zielordner Win11_C..."
+    New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+
+    Write-Log -Level INFO -Message "Kopiere Dateien nach Win11_C..."
+    Copy-Item -Path "$Source\*" -Destination $Destination -Recurse -Force
+
+    Write-Log -Level INFO -Message "Entferne versteckte Attribute..."
+    Get-ChildItem -Path $Destination -Recurse -Force | ForEach-Object {
+        $_.Attributes = 'Normal'
+    }
+    (Get-Item $Destination).Attributes = 'Normal'
+
+    Write-Log -Level INFO -Message "Kopiervorgang abgeschlossen."
 }
-
-if (Test-Path $Destination) {
-    Write-Log -Level INFO -Message "Lösche vorhandenen Ordner Win11_C..."
-    Remove-Item -Path $Destination -Recurse -Force
-    Start-Sleep -Milliseconds 300
-} else {
-    Write-Log -Level INFO -Message "Ordner Win11_C existiert nicht, kein Löschen notwendig."
+catch {
+    Write-Log -Level ERROR -Message "Fehler im Import-Schritt: $($_.Exception.Message)"
 }
-
-Write-Log -Level INFO -Message "Erstelle Zielordner Win11_C..."
-New-Item -ItemType Directory -Path $Destination -Force | Out-Null
-
-Write-Log -Level INFO -Message "Kopiere Dateien nach Win11_C..."
-Copy-Item -Path "$Source\*" -Destination $Destination -Recurse -Force
-
-Write-Log -Level INFO -Message "Entferne versteckte Attribute..."
-Get-ChildItem -Path $Destination -Recurse -Force | ForEach-Object {
-    $_.Attributes = 'Normal'
-}
-(Get-Item $Destination).Attributes = 'Normal'
-
-Write-Log -Level INFO -Message "Kopiervorgang abgeschlossen."
 
 # ---------------------------------------------------------
 # 2. WARTEN (60 Sekunden)
@@ -152,28 +169,33 @@ Start-Sleep -Seconds 60
 
 Write-Log -Level INFO -Message "WatchDog gestartet."
 
-$ScriptRoot = "C:\Program Files\10020115_WinScripts\Win11_C\Software\Scripte"
-Write-Log -Level INFO -Message "Suche nach Skripten in: $ScriptRoot"
+try {
+    $ScriptRoot = "C:\Users\Public\10020115_WinScripts\Win11_C\Software\Scripte"
+    Write-Log -Level INFO -Message "Suche nach Skripten in: $ScriptRoot"
 
-# Datei explizit ausschließen
-$ExcludeFile = "C:\Program Files\10020115_WinScripts\Win11_C\Software\Scripte\StartUp\10020115_Win_S_Watchdog.ps1"
+    $ExcludeFile = "C:\Users\Public\10020115_WinScripts\Win11_C\Software\Scripte\StartUp\10020115_Win_S_Watchdog.ps1"
 
-$Scripts = Get-ChildItem -Path $ScriptRoot -Filter "*.ps1" -Recurse |
-    Where-Object { $_.FullName -ne $ExcludeFile }
+    $Scripts = Get-ChildItem -Path $ScriptRoot -Filter "*.ps1" -Recurse |
+        Where-Object { $_.FullName -ne $ExcludeFile }
 
-if ($Scripts.Count -gt 0) {
-    foreach ($Script in $Scripts) {
-        Write-Log -Level "INFO" -Message "Starte Script: $($Script.FullName)"
-        try {
-            powershell.exe -ExecutionPolicy Bypass -File $Script.FullName -Wait
-            Write-Log -Level "INFO" -Message "Fertig: $($Script.Name)"
-        }
-        catch {
-            Write-Log -Level "ERROR" -Message "Fehler in $($Script.Name): $_"
+    if ($Scripts.Count -gt 0) {
+        foreach ($Script in $Scripts) {
+            Write-Log -Level "INFO" -Message "Starte Script: $($Script.FullName)"
+            try {
+                powershell.exe -ExecutionPolicy Bypass -File $Script.FullName -Wait
+                Write-Log -Level "INFO" -Message "Fertig: $($Script.Name)"
+            }
+            catch {
+                Write-Log -Level "ERROR" -Message "Fehler in $($Script.Name): $($_.Exception.Message)"
+            }
         }
     }
-} else {
-    Write-Log -Level "WARN" -Message "Keine Skripte gefunden."
+    else {
+        Write-Log -Level "WARN" -Message "Keine Skripte gefunden."
+    }
+}
+catch {
+    Write-Log -Level ERROR -Message "Fehler im WatchDog: $($_.Exception.Message)"
 }
 
 Write-Log -Level INFO -Message "WatchDog abgeschlossen."
