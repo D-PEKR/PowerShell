@@ -12,7 +12,7 @@ $RegOEM = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\OEMInformation"
 New-Item -Path $RegOEM -Force | Out-Null
 
 # OEM Logo in C:\Windows\Web\Wallpaper kopieren
-$SourceLogo = "C:\Users\DLRG-JugendAndernach\OneDrive - DLRG OG Andernach e.V\Bilder\Logo\Logo.png"
+$SourceLogo = "C:\Program Files\10020115_WinScripts\Win11_C\Bilder\Logo\OEMLogo.png"
 $TargetLogo = "C:\Windows\Web\Wallpaper\OEMLogo.png"
 
 try {

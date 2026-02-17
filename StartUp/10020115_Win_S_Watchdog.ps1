@@ -1,48 +1,81 @@
-# ================================
-# WATCHDOG MIT LOGGER
-# ================================
-
-# Basisverzeichnis des Watchdogs
-$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
-
-# Pfad zum PowerShell-Modul
-$ModulePath = Join-Path $Root "PowerShell\Logging.psm1"
-
-# Modul laden
-$modulePath = "C:\Program Files\10020115_WinScripts\Scripte\Logging.psm1"
+# ---------------------------------------------------------
+# Logger initialisieren
+# ---------------------------------------------------------
+$modulePath = "C:\Program Files\10020115_WinScripts\Win11_C\Software\Scripte\Logging.psm1"
 Import-Module $modulePath -ErrorAction Stop
 
 Initialize-Logger -Level "INFO"
 
-Write-Log -Level "INFO" -Message "WatchDog gestartet."
-Write-Log -Level "INFO" -Message "Arbeitsverzeichnis: $Root"
+Write-Log -Level INFO -Message "Starte kombinierten Import- und WatchDog-Prozess."
 
 
-# ------------------------------------------------------------
-# 1. ImportScript ausführen
-# ------------------------------------------------------------
-$ImportScript = Join-Path $Root "10020115_Win_S_ImportScript.ps1"
+# ---------------------------------------------------------
+# 1. IMPORT-SCHRITT
+# ---------------------------------------------------------
 
-if (Test-Path $ImportScript) {
-    Write-Log -Level "INFO" -Message "Starte ImportScript: $ImportScript"
-    powershell.exe -ExecutionPolicy Bypass -File $ImportScript -Wait
-    Write-Log -Level "INFO" -Message "ImportScript abgeschlossen."
-} else {
-    Write-Log -Level "ERROR" -Message "ImportScript nicht gefunden: $ImportScript"
+$Source = "C:\Users\Win11ProTest\DLRG\DLRG OG Andernach Projekte-Jugendnotebooks - Jugendnotebooks\Win11_C"
+$DestinationRoot = "C:\Program Files\10020115_WinScripts"
+$Destination = Join-Path $DestinationRoot "Win11_C"
+
+Write-Log -Level INFO -Message "Starte Kopiervorgang für Win11_C"
+Write-Log -Level INFO -Message "Quelle: $Source"
+Write-Log -Level INFO -Message "Ziel: $Destination"
+
+# Offline-Attribute entfernen
+Write-Log -Level INFO -Message "Entferne mögliche Offline-Attribute aus Quelldateien..."
+Get-ChildItem $Source -Recurse -Force | ForEach-Object {
+    attrib -P $_.FullName 2>$null
 }
 
+# Zielordner löschen
+if (Test-Path $Destination) {
+    Write-Log -Level INFO -Message "Lösche vorhandenen Ordner Win11_C..."
+    Remove-Item -Path $Destination -Recurse -Force
+    Start-Sleep -Milliseconds 300
+} else {
+    Write-Log -Level INFO -Message "Ordner Win11_C existiert nicht – kein Löschen notwendig."
+}
 
-# ------------------------------------------------------------
-# 2. Richtlinien-Skripte (10020115_Win_R_...) ausführen
-# ------------------------------------------------------------
-$RichtlinienPfad = Join-Path $Root "PowerShell\Richtlinien"
-Write-Log -Level "INFO" -Message "Suche Richtlinien-Skripte in: $RichtlinienPfad"
+# Zielordner neu erstellen
+Write-Log -Level INFO -Message "Erstelle Zielordner Win11_C..."
+New-Item -ItemType Directory -Path $Destination -Force | Out-Null
 
-$Richtlinien = Get-ChildItem -Path $RichtlinienPfad -Filter "10020115_Win_R_*.ps1"
+# Dateien kopieren
+Write-Log -Level INFO -Message "Kopiere Dateien nach Win11_C..."
+Copy-Item -Path $Source -Destination $Destination -Recurse -Force
 
-if ($Richtlinien.Count -gt 0) {
-    foreach ($Script in $Richtlinien) {
-        Write-Log -Level "INFO" -Message "Starte Richtlinien-Script: $($Script.FullName)"
+# Attribute normalisieren
+Write-Log -Level INFO -Message "Entferne versteckte Attribute..."
+Get-ChildItem -Path $Destination -Recurse -Force | ForEach-Object {
+    $_.Attributes = 'Normal'
+}
+(Get-Item $Destination).Attributes = 'Normal'
+
+Write-Log -Level INFO -Message "Kopiervorgang abgeschlossen."
+
+
+# ---------------------------------------------------------
+# 2. WARTEN (60 Sekunden)
+# ---------------------------------------------------------
+Write-Log -Level INFO -Message "Warte 60 Sekunden, bevor WatchDog startet..."
+Start-Sleep -Seconds 60
+
+
+# ---------------------------------------------------------
+# 3. WATCHDOG – Skripte rekursiv ausführen
+# ---------------------------------------------------------
+
+Write-Log -Level INFO -Message "WatchDog gestartet."
+
+$ScriptRoot = "C:\Program Files\10020115_WinScripts\Win11_C\Software\Scripte"
+Write-Log -Level INFO -Message "Suche nach Skripten in: $ScriptRoot"
+
+# Alle PS1-Dateien rekursiv suchen
+$Scripts = Get-ChildItem -Path $ScriptRoot -Filter "*.ps1" -Recurse
+
+if ($Scripts.Count -gt 0) {
+    foreach ($Script in $Scripts) {
+        Write-Log -Level "INFO" -Message "Starte Script: $($Script.FullName)"
         try {
             powershell.exe -ExecutionPolicy Bypass -File $Script.FullName -Wait
             Write-Log -Level "INFO" -Message "Fertig: $($Script.Name)"
@@ -52,39 +85,8 @@ if ($Richtlinien.Count -gt 0) {
         }
     }
 } else {
-    Write-Log -Level "WARN" -Message "Keine Richtlinien-Skripte gefunden."
+    Write-Log -Level "WARN" -Message "Keine Skripte gefunden."
 }
 
-
-# ------------------------------------------------------------
-# 3. Log-Script ausführen
-# ------------------------------------------------------------
-$LogScript = Join-Path $Root "PowerShell\Programme\10020115_Win_Log_Software.ps1"
-
-if (Test-Path $LogScript) {
-    Write-Log -Level "INFO" -Message "Starte Log-Script: $LogScript"
-    powershell.exe -ExecutionPolicy Bypass -File $LogScript -Wait
-    Write-Log -Level "INFO" -Message "Log-Script abgeschlossen."
-} else {
-    Write-Log -Level "ERROR" -Message "Log-Script nicht gefunden: $LogScript"
-}
-
-
-# ------------------------------------------------------------
-# 4. ListApps-Script ausführen
-# ------------------------------------------------------------
-$ListApps = Join-Path $Root "PowerShell\InstallSoftware\10020115_Win_A_ListApps.ps1"
-
-if (Test-Path $ListApps) {
-    Write-Log -Level "INFO" -Message "Starte ListApps-Script: $ListApps"
-    powershell.exe -ExecutionPolicy Bypass -File $ListApps -Wait
-    Write-Log -Level "INFO" -Message "ListApps-Script abgeschlossen."
-} else {
-    Write-Log -Level "ERROR" -Message "ListApps-Script nicht gefunden: $ListApps"
-}
-
-
-# ------------------------------------------------------------
-# WatchDog Ende
-# ------------------------------------------------------------
-Write-Log -Level "INFO" -Message "WatchDog abgeschlossen."
+Write-Log -Level INFO -Message "WatchDog abgeschlossen."
+Write-Log -Level INFO -Message "Gesamter Prozess beendet."
