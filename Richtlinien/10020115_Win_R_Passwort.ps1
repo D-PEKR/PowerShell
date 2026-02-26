@@ -49,7 +49,7 @@ try {
     Set-ItemProperty -Path $RegPIN -Name "UppercaseLetters" -Value 1 -Type DWord
     Set-ItemProperty -Path $RegPIN -Name "SpecialCharacters" -Value 1 -Type DWord
     Set-ItemProperty -Path $RegPIN -Name "MinimumPINLength" -Value 8 -Type DWord
-    Set-ItemProperty -Path $RegPIN -Name "Expiration" -Value 90 -Type DWord
+    Set-ItemProperty -Path $RegPIN -Name "Expiration" -Value 180 -Type DWord
 
     Write-Log -Level INFO -Message "GPO gesetzt: PIN-Komplexität vollständig angewendet"
 }

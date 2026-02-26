@@ -1,142 +1,168 @@
-# ------------------------------------------------------------
-# GLOBAL ERROR HANDLING – ALLE FEHLER AUTOMATISCH INS LOG
-# ------------------------------------------------------------
-
-# Alle Fehler als "terminierend" behandeln
-$ErrorActionPreference = "Stop"
-$Global:PSDefaultParameterValues['*:ErrorAction'] = 'Stop'
-
-# Globaler Fehler-Logger
-Register-EngineEvent PowerShell.OnScriptError -Action {
-    $msg = $_.SourceArgs[0].Exception.Message
-    Write-Log -Level "ERROR" -Message "PowerShell-Fehler: $msg"
-} | Out-Null
-
+#Requires -Version 5.1
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
 
 # ------------------------------------------------------------
-# Logging-Modul laden
+# Modul laden & Logging starten
 # ------------------------------------------------------------
-
 $modulePath = "C:\Users\Public\10020115_WinScripts\Win11_C\Software\Scripte\Logging.psm1"
 Import-Module $modulePath -ErrorAction Stop
-
 Initialize-Logger -Level "INFO"
-Write-Log -Level INFO -Message "Starte Benutzerkonfiguration Installationen kontrollieren"
-
+Write-Log -Level INFO -Message "Starte Benutzerkonfiguration: Installationen kontrollieren (optimiert, ohne using)"
 
 # ------------------------------------------------------------
-# 1. Admin-Key prüfen
+# Hilfsfunktionen: Schnelle Registry-Operationen via .NET
 # ------------------------------------------------------------
+function Open-BaseKey {
+    param(
+        [Parameter(Mandatory)][Microsoft.Win32.RegistryHive]$Hive
+    )
+    return [Microsoft.Win32.RegistryKey]::OpenBaseKey($Hive, [Microsoft.Win32.RegistryView]::Default)
+}
 
-$AdminKey = "C:\ProgramData\AdminInstall.key"
+function Open-Or-CreateSubKey {
+    param(
+        [Parameter(Mandatory)][Microsoft.Win32.RegistryKey]$BaseKey,
+        [Parameter(Mandatory)][string]$SubPath
+    )
+    # CreateSubKey erstellt bei Bedarf, öffnet andernfalls schreibbar
+    return $BaseKey.CreateSubKey($SubPath, [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadWriteSubTree)
+}
 
-try {
-    if (Test-Path $AdminKey) {
-        Write-Log -Level INFO -Message "Admin-Key gefunden – Installationen werden ERLAUBT"
-        $AllowInstall = $true
+function Set-RegValueIfChanged {
+    <#
+      .SYNOPSIS
+        Setzt einen Registry-Wert nur, wenn er sich geändert hat (minimiert I/O).
+      .OUTPUTS
+        [bool] True, wenn geschrieben wurde; sonst False.
+    #>
+    param(
+        [Parameter(Mandatory)][Microsoft.Win32.RegistryKey]$Key,
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][object]$Value,
+        [Parameter(Mandatory)][Microsoft.Win32.RegistryValueKind]$Kind
+    )
+    $current = $Key.GetValue($Name, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+
+    $equal = $false
+    switch ($Kind) {
+        ([Microsoft.Win32.RegistryValueKind]::DWord) {
+            $target = [int]$Value
+            if ($null -ne $current -and ([int]$current -eq $target)) { $equal = $true }
+        }
+        default {
+            $target = [string]$Value
+            if ($null -ne $current -and ([string]$current) -ceq $target) { $equal = $true }
+        }
     }
-    else {
-        Write-Log -Level INFO -Message "Kein Admin-Key – Installationen werden BLOCKIERT"
-        $AllowInstall = $false
+
+    if (-not $equal) {
+        $Key.SetValue($Name, $Value, $Kind)
+        return $true
+    }
+    return $false
+}
+
+function Require-AdminForHKLM {
+    $id  = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $pri = [Security.Principal.WindowsPrincipal]::new($id)
+    if (-not $pri.IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)) {
+        Write-Log -Level ERROR -Message "HKLM-Schreibzugriff erfordert Administratorrechte."
+        throw "Administratorrechte erforderlich für HKLM-Änderungen."
     }
 }
-catch {
-    Write-Log -Level ERROR -Message "Fehler beim Prüfen des Admin-Keys: $($_.Exception.Message)"
+
+# ------------------------------------------------------------
+# 1) Admin-Key prüfen (leichter Dateicheck)
+# ------------------------------------------------------------
+$AdminKeyFile = "C:\ProgramData\AdminInstall.key"
+$AllowInstall = Test-Path -Path $AdminKeyFile -PathType Leaf
+
+if ($AllowInstall) {
+    Write-Log -Level INFO -Message "Admin-Key gefunden – Installationen werden ERLAUBT."
+} else {
+    Write-Log -Level INFO -Message "Kein Admin-Key – Installationen werden BLOCKIERT."
 }
 
-
 # ------------------------------------------------------------
-# 2. Software Restriction Policies (SRP) konfigurieren
+# 2) SRP (Software Restriction Policies) effizient setzen (HKLM)
 # ------------------------------------------------------------
+Require-AdminForHKLM
 
-$SRPBase = "HKLM:\Software\Policies\Microsoft\Windows\Safer\CodeIdentifiers"
-
+$lm = Open-BaseKey -Hive ([Microsoft.Win32.RegistryHive]::LocalMachine)
+$srpKey = $null
+$changedHKLM = 0
 try {
-    New-Item $SRPBase -Force | Out-Null
+    $srpKey = Open-Or-CreateSubKey -BaseKey $lm -SubPath "Software\Policies\Microsoft\Windows\Safer\CodeIdentifiers"
 
-    Set-ItemProperty -Path $SRPBase -Name "PolicyScope" -Value 0 -Type DWord
-    Set-ItemProperty -Path $SRPBase -Name "TransparentEnabled" -Value 1 -Type DWord
-    Set-ItemProperty -Path $SRPBase -Name "AuthenticodeEnabled" -Value 0 -Type DWord
+    # Basiswerte (nur bei Änderung schreiben)
+    if (Set-RegValueIfChanged -Key $srpKey -Name "PolicyScope"        -Value 0 -Kind ([Microsoft.Win32.RegistryValueKind]::DWord)) { $changedHKLM++ }
+    if (Set-RegValueIfChanged -Key $srpKey -Name "TransparentEnabled" -Value 1 -Kind ([Microsoft.Win32.RegistryValueKind]::DWord)) { $changedHKLM++ }
+    if (Set-RegValueIfChanged -Key $srpKey -Name "AuthenticodeEnabled"-Value 0 -Kind ([Microsoft.Win32.RegistryValueKind]::DWord)) { $changedHKLM++ }
 
-    Write-Log -Level INFO -Message "SRP-Basiswerte gesetzt"
-}
-catch {
-    Write-Log -Level ERROR -Message "Fehler beim Setzen der SRP-Basiswerte: $($_.Exception.Message)"
-}
-
-
-# ------------------------------------------------------------
-# 3. Installationen erlauben oder blockieren
-# ------------------------------------------------------------
-
-try {
-    if ($AllowInstall) {
-        # 0x40000 = Unrestricted
-        Set-ItemProperty -Path $SRPBase -Name "DefaultLevel" -Value 0x40000 -Type DWord
-        Write-Log -Level INFO -Message "SRP: Installationen sind ERLAUBT"
-    }
-    else {
-        # 0x0 = Disallowed
-        Set-ItemProperty -Path $SRPBase -Name "DefaultLevel" -Value 0x0 -Type DWord
-        Write-Log -Level INFO -Message "SRP: Installationen sind BLOCKIERT"
+    # DefaultLevel je nach Admin-Key
+    $defaultLevel = if ($AllowInstall) { 0x40000 } else { 0x0 }  # 262144 = Unrestricted, 0 = Disallowed
+    if (Set-RegValueIfChanged -Key $srpKey -Name "DefaultLevel" -Value $defaultLevel -Kind ([Microsoft.Win32.RegistryValueKind]::DWord)) {
+        $changedHKLM++
+        Write-Log -Level INFO -Message ("SRP: DefaultLevel gesetzt auf {0}" -f ("0x{0:X}" -f $defaultLevel))
+    } else {
+        Write-Log -Level INFO -Message ("SRP: DefaultLevel unverändert (bereits {0})" -f ("0x{0:X}" -f $defaultLevel))
     }
 }
-catch {
-    Write-Log -Level ERROR -Message "Fehler beim Setzen der Installationsrichtlinie: $($_.Exception.Message)"
+finally {
+    if ($srpKey) { $srpKey.Close() }
+    if ($lm) { $lm.Close() }
 }
-
 
 # ------------------------------------------------------------
-# 4. Optional: Einstellungen & Deinstallation verstecken
+# 3) Optionale Benutzerbeschränkungen (HKCU) schnell & idempotent
 # ------------------------------------------------------------
-
-# Apps & Features ausblenden
+$user = Open-BaseKey -Hive ([Microsoft.Win32.RegistryHive]::CurrentUser)
+$changedHKCU = 0
 try {
-    $SettingsVisibility = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer"
-    New-Item $SettingsVisibility -Force | Out-Null
-    Set-ItemProperty -Path $SettingsVisibility -Name "SettingsPageVisibility" -Value "hide:appsfeatures" -Type String
-    Write-Log -Level INFO -Message "Apps & Features ausgeblendet"
-}
-catch {
-    Write-Log -Level ERROR -Message "Fehler beim Ausblenden von Apps & Features: $($_.Exception.Message)"
-}
+    # Apps & Features ausblenden
+    $explorerPol = Open-Or-CreateSubKey -BaseKey $user -SubPath "Software\Microsoft\Windows\CurrentVersion\Policies\Explorer"
+    if (Set-RegValueIfChanged -Key $explorerPol -Name "SettingsPageVisibility" -Value "hide:appsfeatures" -Kind ([Microsoft.Win32.RegistryValueKind]::String)) {
+        $changedHKCU++
+        Write-Log -Level INFO -Message "Apps & Features ausgeblendet (SettingsPageVisibility)."
+    }
+    $explorerPol.Close()
 
-# UWP-App-Deinstallation blockieren
-try {
-    $UwpPolicy = "HKCU:\Software\Policies\Microsoft\Windows\Appx"
-    New-Item $UwpPolicy -Force | Out-Null
-    Set-ItemProperty -Path $UwpPolicy -Name "BlockRemoval" -Value 1 -Type DWord
-    Write-Log -Level INFO -Message "UWP-App-Deinstallation blockiert"
-}
-catch {
-    Write-Log -Level ERROR -Message "Fehler beim Blockieren der UWP-Deinstallation: $($_.Exception.Message)"
-}
+    # UWP-App-Deinstallation blockieren
+    $appxPol = Open-Or-CreateSubKey -BaseKey $user -SubPath "Software\Policies\Microsoft\Windows\Appx"
+    if (Set-RegValueIfChanged -Key $appxPol -Name "BlockRemoval" -Value 1 -Kind ([Microsoft.Win32.RegistryValueKind]::DWord)) {
+        $changedHKCU++
+        Write-Log -Level INFO -Message "UWP-App-Deinstallation blockiert (BlockRemoval=1)."
+    }
+    $appxPol.Close()
 
-# Klassische Programme: Deinstallation blockieren
-try {
-    $UninstallPolicy = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\Uninstall"
-    New-Item $UninstallPolicy -Force | Out-Null
-    Set-ItemProperty -Path $UninstallPolicy -Name "NoAddRemovePrograms" -Value 1 -Type DWord
-    Write-Log -Level INFO -Message "Deinstallation klassischer Programme blockiert"
-}
-catch {
-    Write-Log -Level ERROR -Message "Fehler beim Blockieren klassischer Deinstallationen: $($_.Exception.Message)"
-}
+    # Klassische Programme: Deinstallation blockieren
+    $uninstPol = Open-Or-CreateSubKey -BaseKey $user -SubPath "Software\Microsoft\Windows\CurrentVersion\Policies\Uninstall"
+    if (Set-RegValueIfChanged -Key $uninstPol -Name "NoAddRemovePrograms" -Value 1 -Kind ([Microsoft.Win32.RegistryValueKind]::DWord)) {
+        $changedHKCU++
+        Write-Log -Level INFO -Message "Deinstallation klassischer Programme blockiert (NoAddRemovePrograms=1)."
+    }
+    $uninstPol.Close()
 
-# Systemsteuerung Programme blockieren
-try {
-    $SystemPolicy = "HKCU:\Software\Policies\Microsoft\Windows\Control Panel"
-    New-Item $SystemPolicy -Force | Out-Null
-    Set-ItemProperty -Path $SystemPolicy -Name "DisableProgramsControlPanel" -Value 1 -Type DWord
-    Write-Log -Level INFO -Message "Zugriff auf Programme/Systemsteuerung blockiert"
+    # Systemsteuerung Programme blockieren
+    $cpol = Open-Or-CreateSubKey -BaseKey $user -SubPath "Software\Policies\Microsoft\Windows\Control Panel"
+    if (Set-RegValueIfChanged -Key $cpol -Name "DisableProgramsControlPanel" -Value 1 -Kind ([Microsoft.Win32.RegistryValueKind]::DWord)) {
+        $changedHKCU++
+        Write-Log -Level INFO -Message "Zugriff auf Programme/Systemsteuerung blockiert (DisableProgramsControlPanel=1)."
+    }
+    $cpol.Close()
 }
-catch {
-    Write-Log -Level ERROR -Message "Fehler beim Blockieren der Systemsteuerung: $($_.Exception.Message)"
+finally {
+    if ($user) { $user.Close() }
 }
-
 
 # ------------------------------------------------------------
-# Fertig
+# 4) Zusammenfassung
 # ------------------------------------------------------------
+if ($changedHKLM -eq 0 -and $changedHKCU -eq 0) {
+    Write-Log -Level INFO -Message "Keine Änderungen erforderlich – alle Werte waren bereits korrekt."
+} else {
+    Write-Log -Level INFO -Message ("Änderungen angewendet: HKLM={0}, HKCU={1}" -f $changedHKLM, $changedHKCU)
+}
 
-Write-Log -Level INFO -Message "Benutzerkonfiguration abgeschlossen – Installationen kontrolliert"
+Write-Log -Level INFO -Message "Benutzerkonfiguration abgeschlossen – Installationen kontrolliert (optimiert)"
