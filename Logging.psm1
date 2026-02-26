@@ -7,8 +7,6 @@ $Global:DefaultLogFolder = "C:\Users\Public\10020115_WinScripts\Logs"
 
 function Initialize-Logger {
     param(
-        [string]$FileName = "log_$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss').log",
-
         [ValidateSet("DEBUG","INFO","WARN","ERROR")]
         [string]$Level = "INFO",
 
@@ -21,6 +19,10 @@ function Initialize-Logger {
     if (-not (Test-Path $Global:DefaultLogFolder)) {
         New-Item -Path $Global:DefaultLogFolder -ItemType Directory -Force | Out-Null
     }
+
+    # Tagesbasierter Dateiname
+    $date = Get-Date -Format "yyyy-MM-dd"
+    $FileName = "log_$date.log"
 
     # Logdatei zusammensetzen
     $Path = Join-Path $Global:DefaultLogFolder $FileName
@@ -39,22 +41,30 @@ function Initialize-Logger {
     Write-Log -Level "INFO" -Message "Logger initialisiert. Logfile: $Path"
 }
 
-# Funktion: Rotate-Log
 function Rotate-Log {
     if (-not (Test-Path $LogFilePath)) { return }
 
+    # Größenrotation
     $sizeMB = (Get-Item $LogFilePath).Length / 1MB
-
     if ($sizeMB -ge $Global:MaxLogSizeMB) {
         $timestamp = (Get-Date -Format "yyyyMMdd_HHmmss")
         $archivePath = "$LogFilePath.$timestamp.bak"
-
         Move-Item -Path $LogFilePath -Destination $archivePath -Force
         New-Item -Path $LogFilePath -ItemType File -Force | Out-Null
     }
+
+    # Tagesrotation
+    $currentDate = Get-Date -Format "yyyy-MM-dd"
+    $expectedFile = Join-Path $Global:DefaultLogFolder "log_$currentDate.log"
+
+    if ($expectedFile -ne $Global:LogFilePath) {
+        $Global:LogFilePath = $expectedFile
+        if (-not (Test-Path $expectedFile)) {
+            New-Item -Path $expectedFile -ItemType File -Force | Out-Null
+        }
+    }
 }
 
-# Funktion: Write-Log
 function Write-Log {
     param(
         [Parameter(Mandatory)]
@@ -67,9 +77,7 @@ function Write-Log {
 
     # Log-Level-Filter
     $levels = @{ DEBUG = 1; INFO = 2; WARN = 3; ERROR = 4 }
-    if ($levels[$Level] -lt $levels[$Global:LogLevel]) {
-        return
-    }
+    if ($levels[$Level] -lt $levels[$Global:LogLevel]) { return }
 
     Rotate-Log
 
@@ -88,7 +96,6 @@ function Write-Log {
     }
 }
 
-# Funktion: Get-LogConfig
 function Get-LogConfig {
     [PSCustomObject]@{
         LogFilePath     = $Global:LogFilePath

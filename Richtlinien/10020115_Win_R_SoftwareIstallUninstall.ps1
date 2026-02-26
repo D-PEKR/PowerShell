@@ -25,7 +25,6 @@ function Open-Or-CreateSubKey {
         [Parameter(Mandatory)][Microsoft.Win32.RegistryKey]$BaseKey,
         [Parameter(Mandatory)][string]$SubPath
     )
-    # CreateSubKey erstellt bei Bedarf, öffnet andernfalls schreibbar
     return $BaseKey.CreateSubKey($SubPath, [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadWriteSubTree)
 }
 
@@ -42,6 +41,7 @@ function Set-RegValueIfChanged {
         [Parameter(Mandatory)][object]$Value,
         [Parameter(Mandatory)][Microsoft.Win32.RegistryValueKind]$Kind
     )
+
     $current = $Key.GetValue($Name, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
 
     $equal = $false
@@ -92,6 +92,7 @@ Require-AdminForHKLM
 $lm = Open-BaseKey -Hive ([Microsoft.Win32.RegistryHive]::LocalMachine)
 $srpKey = $null
 $changedHKLM = 0
+
 try {
     $srpKey = Open-Or-CreateSubKey -BaseKey $lm -SubPath "Software\Policies\Microsoft\Windows\Safer\CodeIdentifiers"
 
@@ -102,6 +103,7 @@ try {
 
     # DefaultLevel je nach Admin-Key
     $defaultLevel = if ($AllowInstall) { 0x40000 } else { 0x0 }  # 262144 = Unrestricted, 0 = Disallowed
+
     if (Set-RegValueIfChanged -Key $srpKey -Name "DefaultLevel" -Value $defaultLevel -Kind ([Microsoft.Win32.RegistryValueKind]::DWord)) {
         $changedHKLM++
         Write-Log -Level INFO -Message ("SRP: DefaultLevel gesetzt auf {0}" -f ("0x{0:X}" -f $defaultLevel))
@@ -119,6 +121,7 @@ finally {
 # ------------------------------------------------------------
 $user = Open-BaseKey -Hive ([Microsoft.Win32.RegistryHive]::CurrentUser)
 $changedHKCU = 0
+
 try {
     # Apps & Features ausblenden
     $explorerPol = Open-Or-CreateSubKey -BaseKey $user -SubPath "Software\Microsoft\Windows\CurrentVersion\Policies\Explorer"
