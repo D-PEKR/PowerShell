@@ -95,6 +95,7 @@ function Get-LogConfig {
 
 # ---------------------------------------------------------
 # Internetverbindung prüfen (mit Retry und Timeout)
+# Wartezeit zwischen Versuchen standardmäßig 10 Sekunden
 # ---------------------------------------------------------
 function Test-InternetConnection {
     param(
@@ -113,7 +114,9 @@ function Test-InternetConnection {
         }
         catch {
             Write-Log -Level "WARN" -Message "Keine Internetverbindung (Versuch $i/$Retries): $($_.Exception.Message)"
-            if ($i -lt $Retries) { Start-Sleep -Seconds $DelaySeconds }
+            if ($i -lt $Retries) {
+                Start-Sleep -Seconds $DelaySeconds
+            }
         }
     }
 
@@ -185,8 +188,34 @@ $Destination = Join-Path $DestinationRoot "Win11_C"
 
 Write-Log -Level INFO -Message "Prüfe Internetverbindung vor Kopiervorgang..."
 
+# Pfad zur Message-Script-Datei (prüfe Quelle zuerst, dann Ziel)
+$MessageScriptRelative = "C:\Users\Public\10020115_WinScripts\Win11_C\Software\Scripte\StartUp\10020115_Win_S_MessageWLAN.ps1"
+$MessageScriptSource = Join-Path $Source $MessageScriptRelative
+$MessageScriptDestination = Join-Path $Destination $MessageScriptRelative
+
 if (-not (Test-InternetConnection -Retries 5 -DelaySeconds 10 -TimeoutSec 10)) {
-    Write-Log -Level "ERROR" -Message "Abbruch: Keine Internetverbindung. Kopiervorgang wird nicht gestartet."
+    Write-Log -Level "ERROR" -Message "Abbruch: Keine Internetverbindung. Versuche Message-Script auszuführen."
+
+    if (Test-Path $MessageScriptSource) {
+        Write-Log -Level "INFO" -Message "Führe Message-Script aus (Quelle): $MessageScriptSource"
+        try {
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $MessageScriptSource
+            Write-Log -Level "INFO" -Message "Message-Script ausgeführt: $MessageScriptSource"
+        } catch {
+            Write-Log -Level "WARN" -Message "Ausführen des Message-Scripts (Quelle) fehlgeschlagen: $($_.Exception.Message)"
+        }
+    } elseif (Test-Path $MessageScriptDestination) {
+        Write-Log -Level "INFO" -Message "Führe Message-Script aus (Ziel): $MessageScriptDestination"
+        try {
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $MessageScriptDestination
+            Write-Log -Level "INFO" -Message "Message-Script ausgeführt: $MessageScriptDestination"
+        } catch {
+            Write-Log -Level "WARN" -Message "Ausführen des Message-Scripts (Ziel) fehlgeschlagen: $($_.Exception.Message)"
+        }
+    } else {
+        Write-Log -Level "WARN" -Message "Message-Script nicht gefunden (Quelle: $MessageScriptSource, Ziel: $MessageScriptDestination)."
+    }
+
     Write-Log -Level INFO -Message "Gesamter Prozess beendet."
     exit 1
 }
@@ -249,21 +278,25 @@ Start-Sleep -Seconds 3
 
 # ---------------------------------------------------------
 # 3. WATCHDOG – Kodierung sicherstellen, Backup, Skripte rekursiv ausführen
+# - Ignoriere alle Skripte unter dem exakten StartUp-Pfad
 # ---------------------------------------------------------
 Write-Log -Level INFO -Message "WatchDog gestartet."
 
 $ScriptRoot = "C:\Users\Public\10020115_WinScripts\Win11_C\Software\Scripte"
+$StartUpExcludePath = "C:\Users\Public\10020115_WinScripte\Win11_C\Software\Scripte\StartUp"
 Write-Log -Level INFO -Message "Suche nach Skripten in: $ScriptRoot"
+Write-Log -Level DEBUG -Message "StartUp-Ausschlusspfad: $StartUpExcludePath"
 
 # 1) Sicherstellen: alle Skripte konvertieren und Backup anlegen
 Ensure-AllScriptsEncoding -RootPath $ScriptRoot
 
 # 2) Skripte ausführen (separate Prozesse für Isolation; Kodierung ist jetzt kompatibel)
-$ExcludeFile = "C:\Users\Public\10020115_WinScripts\Win11_C\Software\Scripte\StartUp\10020115_Win_S_Watchdog.ps1"
-
 $Scripts = @()
 if (Test-Path $ScriptRoot) {
-    $Scripts = Get-ChildItem -Path $ScriptRoot -Filter "*.ps1" -Recurse -File | Where-Object { $_.FullName -ne $ExcludeFile }
+    $Scripts = Get-ChildItem -Path $ScriptRoot -Filter "*.ps1" -Recurse -File -ErrorAction SilentlyContinue |
+               Where-Object {
+                   -not ($_.FullName.StartsWith($StartUpExcludePath, [System.StringComparison]::InvariantCultureIgnoreCase))
+               }
 } else {
     Write-Log -Level "WARN" -Message "ScriptRoot existiert nicht: $ScriptRoot"
 }
@@ -282,7 +315,7 @@ if ($Scripts.Count -gt 0) {
         }
     }
 } else {
-    Write-Log -Level "WARN" -Message "Keine Skripte gefunden."
+    Write-Log -Level "WARN" -Message "Keine Skripte gefunden (nach Ausschluss von StartUp)."
 }
 
 Write-Log -Level INFO -Message "WatchDog abgeschlossen."
