@@ -1,5 +1,5 @@
 # ---------------------------------------------------------
-# LOGGER – direkt integriert
+# LOGGER – direkt integriert (verbessert)
 # ---------------------------------------------------------
 
 # Globale Variablen
@@ -12,12 +12,9 @@ $Global:DefaultLogFolder = "C:\Users\Public\10020115_WinScripts\Logs\"
 function Initialize-Logger {
     param(
         [string]$FileName = "log_$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss').log",
-
         [ValidateSet("DEBUG","INFO","WARN","ERROR")]
         [string]$Level = "INFO",
-
         [bool]$ConsoleOutput = $true,
-
         [int]$MaxSizeMB = 5
     )
 
@@ -40,16 +37,17 @@ function Initialize-Logger {
 }
 
 function Rotate-Log {
-    if (-not (Test-Path $LogFilePath)) { return }
+    if (-not (Test-Path $Global:LogFilePath)) { return }
 
-    $sizeMB = (Get-Item $LogFilePath).Length / 1MB
+    $sizeMB = (Get-Item $Global:LogFilePath).Length / 1MB
 
     if ($sizeMB -ge $Global:MaxLogSizeMB) {
         $timestamp = (Get-Date -Format "yyyyMMdd_HHmmss")
-        $archivePath = "$LogFilePath.$timestamp.bak"
+        $archivePath = "$Global:LogFilePath.$timestamp.bak"
 
-        Move-Item -Path $LogFilePath -Destination $archivePath -Force
-        New-Item -Path $LogFilePath -ItemType File -Force | Out-Null
+        Move-Item -Path $Global:LogFilePath -Destination $archivePath -Force
+        New-Item -Path $Global:LogFilePath -ItemType File -Force | Out-Null
+        Write-Log -Level "INFO" -Message "Log rotiert: $archivePath"
     }
 }
 
@@ -96,32 +94,126 @@ function Get-LogConfig {
 }
 
 # ---------------------------------------------------------
+# Internetverbindung prüfen (mit Retry und Timeout)
+# ---------------------------------------------------------
+function Test-InternetConnection {
+    param(
+        [int]$Retries = 5,
+        [int]$DelaySeconds = 10,
+        [int]$TimeoutSec = 10
+    )
+
+    for ($i = 1; $i -le $Retries; $i++) {
+        try {
+            $resp = Invoke-WebRequest -Uri "https://www.google.com/generate_204" -UseBasicParsing -TimeoutSec $TimeoutSec -ErrorAction Stop
+            if ($resp.StatusCode -in 200,204) {
+                Write-Log -Level "INFO" -Message "Internetverbindung erkannt (Versuch $i/$Retries)."
+                return $true
+            }
+        }
+        catch {
+            Write-Log -Level "WARN" -Message "Keine Internetverbindung (Versuch $i/$Retries): $($_.Exception.Message)"
+            if ($i -lt $Retries) { Start-Sleep -Seconds $DelaySeconds }
+        }
+    }
+
+    Write-Log -Level "ERROR" -Message "Keine Internetverbindung nach $Retries Versuchen."
+    return $false
+}
+
+# ---------------------------------------------------------
+# Sicherstellen und Backup: Alle .ps1 Dateien konvertieren
+# - Backup wird angelegt: <file>.bak.<timestamp>
+# - Zielkodierung: UTF-16LE (Unicode) mit BOM (Windows PowerShell kompatibel)
+# ---------------------------------------------------------
+function Ensure-AllScriptsEncoding {
+    param(
+        [Parameter(Mandatory)]
+        [string]$RootPath
+    )
+
+    if (-not (Test-Path $RootPath)) {
+        Write-Log -Level "WARN" -Message "Ensure-AllScriptsEncoding: RootPath existiert nicht: $RootPath"
+        return
+    }
+
+    $timestamp = (Get-Date -Format "yyyyMMdd_HHmmss")
+    $ps1Files = Get-ChildItem -Path $RootPath -Filter "*.ps1" -Recurse -File -ErrorAction SilentlyContinue
+
+    foreach ($file in $ps1Files) {
+        try {
+            $bytes = [System.IO.File]::ReadAllBytes($file.FullName)
+            $needsConversion = $true
+
+            if ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE) {
+                # UTF-16 LE BOM vorhanden -> kompatibel
+                $needsConversion = $false
+            } elseif ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+                # UTF-8 with BOM -> kompatibel
+                $needsConversion = $false
+            }
+
+            if ($needsConversion) {
+                $backupPath = "$($file.FullName).bak.$timestamp"
+                Copy-Item -LiteralPath $file.FullName -Destination $backupPath -Force
+                $content = Get-Content -Raw -LiteralPath $file.FullName -ErrorAction Stop
+                # Konvertiere zu UTF-16LE (Unicode) mit BOM
+                $content | Out-File -LiteralPath $file.FullName -Encoding Unicode -Force
+                Write-Log -Level "INFO" -Message "Konvertiert zu UTF-16LE und Backup erstellt: $($file.FullName) -> $backupPath"
+            } else {
+                Write-Log -Level "DEBUG" -Message "Kodierung OK: $($file.FullName)"
+            }
+        }
+        catch {
+            Write-Log -Level "WARN" -Message "Ensure-AllScriptsEncoding fehlgeschlagen: $($file.FullName) - $($_.Exception.Message)"
+        }
+    }
+}
+
+# ---------------------------------------------------------
 # Logger initialisieren
 # ---------------------------------------------------------
 Initialize-Logger -Level "INFO"
 Write-Log -Level INFO -Message "Starte kombinierten Import- und WatchDog-Prozess."
 
 # ---------------------------------------------------------
-# 1. IMPORT-SCHRITT
+# 1. IMPORT-SCHRITT (nur wenn Internet vorhanden)
 # ---------------------------------------------------------
-
 $Source = "C:\Users\DLRG-JugendAndernach\DLRG\DLRG OG Andernach Projekte-Jugendnotebooks - Jugendnotebooks\Win11_C"
 $DestinationRoot = "C:\Users\Public\10020115_WinScripts"
 $Destination = Join-Path $DestinationRoot "Win11_C"
 
-Write-Log -Level INFO -Message "Starte Kopiervorgang fuer Win11_C"
+Write-Log -Level INFO -Message "Prüfe Internetverbindung vor Kopiervorgang..."
+
+if (-not (Test-InternetConnection -Retries 5 -DelaySeconds 10 -TimeoutSec 10)) {
+    Write-Log -Level "ERROR" -Message "Abbruch: Keine Internetverbindung. Kopiervorgang wird nicht gestartet."
+    Write-Log -Level INFO -Message "Gesamter Prozess beendet."
+    exit 1
+}
+
+Write-Log -Level INFO -Message "Internetverbindung vorhanden. Starte Kopiervorgang fuer Win11_C"
 Write-Log -Level INFO -Message "Quelle: $Source"
 Write-Log -Level INFO -Message "Ziel: $Destination"
 
 Write-Log -Level INFO -Message "Entferne moegliche Offline-Attribute aus Quelldateien..."
 Get-ChildItem $Source -Recurse -Force | ForEach-Object {
-    attrib -P $_.FullName 2>$null
+    try {
+        attrib -P $_.FullName 2>$null
+    } catch {
+        Write-Log -Level "WARN" -Message "Attrib entfernen fehlgeschlagen: $($_.FullName) - $($_.Exception.Message)"
+    }
 }
 
 if (Test-Path $Destination) {
     Write-Log -Level INFO -Message "Loesche vorhandenen Ordner Win11_C..."
-    Remove-Item -Path $Destination -Recurse -Force
-    Start-Sleep -Milliseconds 300
+    try {
+        Remove-Item -Path $Destination -Recurse -Force -ErrorAction Stop
+        Start-Sleep -Milliseconds 300
+    } catch {
+        Write-Log -Level "ERROR" -Message "Loeschen des Zielordners fehlgeschlagen: $($_.Exception.Message)"
+        Write-Log -Level INFO -Message "Gesamter Prozess beendet."
+        exit 1
+    }
 } else {
     Write-Log -Level INFO -Message "Ordner Win11_C existiert nicht, kein Loeschen notwendig."
 }
@@ -130,46 +222,63 @@ Write-Log -Level INFO -Message "Erstelle Zielordner Win11_C..."
 New-Item -ItemType Directory -Path $Destination -Force | Out-Null
 
 Write-Log -Level INFO -Message "Kopiere Dateien nach Win11_C..."
-Copy-Item -Path "$Source\*" -Destination $Destination -Recurse -Force
+try {
+    Copy-Item -Path "$Source\*" -Destination $Destination -Recurse -Force -ErrorAction Stop
+    Write-Log -Level INFO -Message "Kopiervorgang abgeschlossen."
+} catch {
+    Write-Log -Level "ERROR" -Message "Kopiervorgang fehlgeschlagen: $($_.Exception.Message)"
+    Write-Log -Level INFO -Message "Gesamter Prozess beendet."
+    exit 1
+}
 
 Write-Log -Level INFO -Message "Entferne versteckte Attribute..."
 Get-ChildItem -Path $Destination -Recurse -Force | ForEach-Object {
-    $_.Attributes = 'Normal'
+    try {
+        $_.Attributes = 'Normal'
+    } catch {
+        Write-Log -Level "WARN" -Message "Attribute setzen fehlgeschlagen: $($_.FullName) - $($_.Exception.Message)"
+    }
 }
-(Get-Item $Destination).Attributes = 'Normal'
-
-Write-Log -Level INFO -Message "Kopiervorgang abgeschlossen."
+try { (Get-Item $Destination).Attributes = 'Normal' } catch {}
 
 # ---------------------------------------------------------
-# 2. WARTEN (60 Sekunden)
+# 2. WARTEN (3 Sekunden)
 # ---------------------------------------------------------
-Write-Log -Level INFO -Message "Warte 60 Sekunden, bevor WatchDog startet..."
-Start-Sleep -Seconds 60
+Write-Log -Level INFO -Message "Warte 3 Sekunden, bevor WatchDog startet..."
+Start-Sleep -Seconds 3
 
 # ---------------------------------------------------------
-# 3. WATCHDOG – Skripte rekursiv ausführen
+# 3. WATCHDOG – Kodierung sicherstellen, Backup, Skripte rekursiv ausführen
 # ---------------------------------------------------------
-
 Write-Log -Level INFO -Message "WatchDog gestartet."
 
 $ScriptRoot = "C:\Users\Public\10020115_WinScripts\Win11_C\Software\Scripte"
 Write-Log -Level INFO -Message "Suche nach Skripten in: $ScriptRoot"
 
-# Datei explizit ausschließen
+# 1) Sicherstellen: alle Skripte konvertieren und Backup anlegen
+Ensure-AllScriptsEncoding -RootPath $ScriptRoot
+
+# 2) Skripte ausführen (separate Prozesse für Isolation; Kodierung ist jetzt kompatibel)
 $ExcludeFile = "C:\Users\Public\10020115_WinScripts\Win11_C\Software\Scripte\StartUp\10020115_Win_S_Watchdog.ps1"
 
-$Scripts = Get-ChildItem -Path $ScriptRoot -Filter "*.ps1" -Recurse |
-    Where-Object { $_.FullName -ne $ExcludeFile }
+$Scripts = @()
+if (Test-Path $ScriptRoot) {
+    $Scripts = Get-ChildItem -Path $ScriptRoot -Filter "*.ps1" -Recurse -File | Where-Object { $_.FullName -ne $ExcludeFile }
+} else {
+    Write-Log -Level "WARN" -Message "ScriptRoot existiert nicht: $ScriptRoot"
+}
 
 if ($Scripts.Count -gt 0) {
     foreach ($Script in $Scripts) {
-        Write-Log -Level "INFO" -Message "Starte Script: $($Script.FullName)"
+        Write-Log -Level "INFO" -Message "Starte Script (separate process): $($Script.FullName)"
         try {
-            powershell.exe -ExecutionPolicy Bypass -File $Script.FullName -Wait
+            $psExe = (Get-Command powershell.exe -ErrorAction Stop).Source
+            $argList = @("-NoProfile","-ExecutionPolicy","Bypass","-File",$Script.FullName)
+            Start-Process -FilePath $psExe -ArgumentList $argList -Wait -NoNewWindow -ErrorAction Stop
             Write-Log -Level "INFO" -Message "Fertig: $($Script.Name)"
         }
         catch {
-            Write-Log -Level "ERROR" -Message "Fehler in $($Script.Name): $_"
+            Write-Log -Level "ERROR" -Message "Fehler in $($Script.Name): $($_.Exception.Message)"
         }
     }
 } else {
