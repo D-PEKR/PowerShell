@@ -180,23 +180,30 @@ Initialize-Logger -Level "INFO"
 Write-Log -Level INFO -Message "Starte kombinierten Import- und WatchDog-Prozess."
 
 # ---------------------------------------------------------
-# 1. IMPORT-SCHRITT (nur wenn Internet vorhanden)
+# 0. Konfiguration
 # ---------------------------------------------------------
 $Source = "C:\Users\DLRG-JugendAndernach\DLRG\DLRG OG Andernach Projekte-Jugendnotebooks - Jugendnotebooks\Win11_C"
 $DestinationRoot = "C:\Users\Public\10020115_WinScripts"
 $Destination = Join-Path $DestinationRoot "Win11_C"
 
-Write-Log -Level INFO -Message "Prüfe Internetverbindung vor Kopiervorgang..."
-
-# Pfad zur Message-Script-Datei (prüfe Quelle zuerst, dann Ziel)
-$MessageScriptRelative = "C:\Users\Public\10020115_WinScripts\Win11_C\Software\Scripte\StartUp\10020115_Win_S_MessageWLAN.ps1"
+# Relativer Pfad zur Message-Script-Datei (relativ zu Source / Destination)
+$MessageScriptRelative = "Software\Scripte\StartUp\10020115_Win_S_Messagebox.ps1"
 $MessageScriptSource = Join-Path $Source $MessageScriptRelative
 $MessageScriptDestination = Join-Path $Destination $MessageScriptRelative
 
+# WatchDog / Skriptpfade
+$ScriptRoot = Join-Path $Destination "Software\Scripte"
+$StartUpExcludePath = Join-Path $Destination "Software\Scripte\StartUp"
+
+Write-Log -Level INFO -Message "Prüfe Internetverbindung vor Kopiervorgang..."
+
+# ---------------------------------------------------------
+# 1. IMPORT-SCHRITT (nur wenn Internet vorhanden)
+# ---------------------------------------------------------
 if (-not (Test-InternetConnection -Retries 5 -DelaySeconds 10 -TimeoutSec 10)) {
     Write-Log -Level "ERROR" -Message "Abbruch: Keine Internetverbindung. Versuche Message-Script auszuführen."
 
-    if (Test-Path $MessageScriptSource) {
+    if (Test-Path -Path $MessageScriptSource) {
         Write-Log -Level "INFO" -Message "Führe Message-Script aus (Quelle): $MessageScriptSource"
         try {
             & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $MessageScriptSource
@@ -204,7 +211,8 @@ if (-not (Test-InternetConnection -Retries 5 -DelaySeconds 10 -TimeoutSec 10)) {
         } catch {
             Write-Log -Level "WARN" -Message "Ausführen des Message-Scripts (Quelle) fehlgeschlagen: $($_.Exception.Message)"
         }
-    } elseif (Test-Path $MessageScriptDestination) {
+    }
+    elseif (Test-Path -Path $MessageScriptDestination) {
         Write-Log -Level "INFO" -Message "Führe Message-Script aus (Ziel): $MessageScriptDestination"
         try {
             & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $MessageScriptDestination
@@ -212,7 +220,8 @@ if (-not (Test-InternetConnection -Retries 5 -DelaySeconds 10 -TimeoutSec 10)) {
         } catch {
             Write-Log -Level "WARN" -Message "Ausführen des Message-Scripts (Ziel) fehlgeschlagen: $($_.Exception.Message)"
         }
-    } else {
+    }
+    else {
         Write-Log -Level "WARN" -Message "Message-Script nicht gefunden (Quelle: $MessageScriptSource, Ziel: $MessageScriptDestination)."
     }
 
@@ -224,16 +233,31 @@ Write-Log -Level INFO -Message "Internetverbindung vorhanden. Starte Kopiervorga
 Write-Log -Level INFO -Message "Quelle: $Source"
 Write-Log -Level INFO -Message "Ziel: $Destination"
 
+# Entferne mögliche Offline-Attribute aus Quelldateien (robust)
 Write-Log -Level INFO -Message "Entferne moegliche Offline-Attribute aus Quelldateien..."
-Get-ChildItem $Source -Recurse -Force | ForEach-Object {
-    try {
-        attrib -P $_.FullName 2>$null
-    } catch {
-        Write-Log -Level "WARN" -Message "Attrib entfernen fehlgeschlagen: $($_.FullName) - $($_.Exception.Message)"
+try {
+    if (Test-Path -Path $Source) {
+        Get-ChildItem -Path $Source -Recurse -Force -File -ErrorAction SilentlyContinue | ForEach-Object {
+            try {
+                $item = Get-Item -LiteralPath $_.FullName -Force
+                if ($item.Attributes -band [System.IO.FileAttributes]::Offline) {
+                    $item.Attributes = $item.Attributes -bxor [System.IO.FileAttributes]::Offline
+                }
+            } catch {
+                Write-Log -Level "WARN" -Message "Attrib entfernen fehlgeschlagen: $($_.FullName) - $($_.Exception.Message)"
+            }
+        }
+    } else {
+        Write-Log -Level "ERROR" -Message "Quellpfad existiert nicht: $Source"
+        Write-Log -Level INFO -Message "Gesamter Prozess beendet."
+        exit 1
     }
+} catch {
+    Write-Log -Level "WARN" -Message "Fehler beim Entfernen von Attributen: $($_.Exception.Message)"
 }
 
-if (Test-Path $Destination) {
+# Lösche vorhandenen Zielordner falls vorhanden
+if (Test-Path -Path $Destination) {
     Write-Log -Level INFO -Message "Loesche vorhandenen Ordner Win11_C..."
     try {
         Remove-Item -Path $Destination -Recurse -Force -ErrorAction Stop
@@ -247,12 +271,20 @@ if (Test-Path $Destination) {
     Write-Log -Level INFO -Message "Ordner Win11_C existiert nicht, kein Loeschen notwendig."
 }
 
+# Erstelle Zielordner
 Write-Log -Level INFO -Message "Erstelle Zielordner Win11_C..."
-New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+try {
+    New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+} catch {
+    Write-Log -Level "ERROR" -Message "Erstellen des Zielordners fehlgeschlagen: $($_.Exception.Message)"
+    Write-Log -Level INFO -Message "Gesamter Prozess beendet."
+    exit 1
+}
 
+# Kopiere Dateien
 Write-Log -Level INFO -Message "Kopiere Dateien nach Win11_C..."
 try {
-    Copy-Item -Path "$Source\*" -Destination $Destination -Recurse -Force -ErrorAction Stop
+    Copy-Item -Path (Join-Path $Source "*") -Destination $Destination -Recurse -Force -ErrorAction Stop
     Write-Log -Level INFO -Message "Kopiervorgang abgeschlossen."
 } catch {
     Write-Log -Level "ERROR" -Message "Kopiervorgang fehlgeschlagen: $($_.Exception.Message)"
@@ -260,15 +292,21 @@ try {
     exit 1
 }
 
-Write-Log -Level INFO -Message "Entferne versteckte Attribute..."
-Get-ChildItem -Path $Destination -Recurse -Force | ForEach-Object {
-    try {
-        $_.Attributes = 'Normal'
-    } catch {
-        Write-Log -Level "WARN" -Message "Attribute setzen fehlgeschlagen: $($_.FullName) - $($_.Exception.Message)"
+# Entferne versteckte / system / read-only Attribute im Ziel (setze Normal)
+Write-Log -Level INFO -Message "Entferne versteckte Attribute im Ziel..."
+try {
+    Get-ChildItem -Path $Destination -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object {
+        try {
+            $it = Get-Item -LiteralPath $_.FullName -Force
+            $it.Attributes = 'Normal'
+        } catch {
+            Write-Log -Level "WARN" -Message "Attribute setzen fehlgeschlagen: $($_.FullName) - $($_.Exception.Message)"
+        }
     }
+    try { (Get-Item -LiteralPath $Destination -Force).Attributes = 'Normal' } catch {}
+} catch {
+    Write-Log -Level "WARN" -Message "Fehler beim Entfernen von Attributen im Ziel: $($_.Exception.Message)"
 }
-try { (Get-Item $Destination).Attributes = 'Normal' } catch {}
 
 # ---------------------------------------------------------
 # 2. WARTEN (3 Sekunden)
@@ -281,27 +319,38 @@ Start-Sleep -Seconds 3
 # - Ignoriere alle Skripte unter dem exakten StartUp-Pfad
 # ---------------------------------------------------------
 Write-Log -Level INFO -Message "WatchDog gestartet."
-
-$ScriptRoot = "C:\Users\Public\10020115_WinScripts\Win11_C\Software\Scripte"
-$StartUpExcludePath = "C:\Users\Public\10020115_WinScripte\Win11_C\Software\Scripte\StartUp"
 Write-Log -Level INFO -Message "Suche nach Skripten in: $ScriptRoot"
 Write-Log -Level DEBUG -Message "StartUp-Ausschlusspfad: $StartUpExcludePath"
 
 # 1) Sicherstellen: alle Skripte konvertieren und Backup anlegen
-Ensure-AllScriptsEncoding -RootPath $ScriptRoot
+try {
+    if (Test-Path -Path $ScriptRoot) {
+        Ensure-AllScriptsEncoding -RootPath $ScriptRoot
+    } else {
+        Write-Log -Level "WARN" -Message "ScriptRoot existiert nicht: $ScriptRoot"
+    }
+} catch {
+    Write-Log -Level "ERROR" -Message "Fehler in Ensure-AllScriptsEncoding: $($_.Exception.Message)"
+}
 
 # 2) Skripte ausführen (separate Prozesse für Isolation; Kodierung ist jetzt kompatibel)
 $Scripts = @()
-if (Test-Path $ScriptRoot) {
+if (Test-Path -Path $ScriptRoot) {
+    # Normalisiere Ausschlusspfad mit abschließendem Backslash für StartsWith-Vergleich
+    $excludeNormalized = [IO.Path]::GetFullPath($StartUpExcludePath)
+    if (-not $excludeNormalized.EndsWith('\')) { $excludeNormalized += '\' }
+
     $Scripts = Get-ChildItem -Path $ScriptRoot -Filter "*.ps1" -Recurse -File -ErrorAction SilentlyContinue |
                Where-Object {
-                   -not ($_.FullName.StartsWith($StartUpExcludePath, [System.StringComparison]::InvariantCultureIgnoreCase))
+                   $full = [IO.Path]::GetFullPath($_.FullName)
+                   # Ausschluss: exakter StartUp-Pfad (inkl. Unterordner) wird ausgeschlossen
+                   -not ($full.StartsWith($excludeNormalized, [System.StringComparison]::InvariantCultureIgnoreCase))
                }
 } else {
     Write-Log -Level "WARN" -Message "ScriptRoot existiert nicht: $ScriptRoot"
 }
 
-if ($Scripts.Count -gt 0) {
+if ($Scripts -and $Scripts.Count -gt 0) {
     foreach ($Script in $Scripts) {
         Write-Log -Level "INFO" -Message "Starte Script (separate process): $($Script.FullName)"
         try {

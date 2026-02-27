@@ -4,6 +4,7 @@ $Global:LogLevel = "INFO"
 $Global:EnableConsoleOutput = $true
 $Global:MaxLogSizeMB = 5
 $Global:DefaultLogFolder = "C:\Users\Public\10020115_WinScripts\Logs"
+$Global:LastLogScriptName = $null
 
 function Initialize-Logger {
     param(
@@ -37,20 +38,21 @@ function Initialize-Logger {
     $Global:LogLevel = $Level
     $Global:EnableConsoleOutput = $ConsoleOutput
     $Global:MaxLogSizeMB = $MaxSizeMB
+    $Global:LastLogScriptName = $null
 
     Write-Log -Level "INFO" -Message "Logger initialisiert. Logfile: $Path"
 }
 
 function Rotate-Log {
-    if (-not (Test-Path $LogFilePath)) { return }
+    if (-not (Test-Path $Global:LogFilePath)) { return }
 
     # Größenrotation
-    $sizeMB = (Get-Item $LogFilePath).Length / 1MB
+    $sizeMB = (Get-Item $Global:LogFilePath).Length / 1MB
     if ($sizeMB -ge $Global:MaxLogSizeMB) {
         $timestamp = (Get-Date -Format "yyyyMMdd_HHmmss")
-        $archivePath = "$LogFilePath.$timestamp.bak"
-        Move-Item -Path $LogFilePath -Destination $archivePath -Force
-        New-Item -Path $LogFilePath -ItemType File -Force | Out-Null
+        $archivePath = "$Global:LogFilePath.$timestamp.bak"
+        Move-Item -Path $Global:LogFilePath -Destination $archivePath -Force
+        New-Item -Path $Global:LogFilePath -ItemType File -Force | Out-Null
     }
 
     # Tagesrotation
@@ -81,6 +83,34 @@ function Write-Log {
 
     Rotate-Log
 
+    # Ermitteln des aufrufenden Script-Namens (erste Frame mit ScriptName)
+    $callStack = Get-PSCallStack
+    $scriptFrame = $callStack | Where-Object { $_.ScriptName -and $_.ScriptName.Trim() -ne "" } | Select-Object -First 1
+    if ($scriptFrame) {
+        $scriptName = Split-Path $scriptFrame.ScriptName -Leaf
+    } else {
+        # Fallback: wenn kein Script (z.B. interaktive Konsole), Host-Name verwenden
+        $scriptName = if ($PSCommandPath) { Split-Path $PSCommandPath -Leaf } else { $Host.Name }
+    }
+
+    # Falls Script gewechselt hat: 3 Leerzeilen + Header schreiben (Datei + Konsole)
+    if ($Global:LastLogScriptName -ne $scriptName) {
+        $nl = [Environment]::NewLine
+        $sep = $nl + $nl + $nl
+        $headerText = "$sep+++ $scriptName +++"
+
+        # Header in Datei
+        Add-Content -Path $Global:LogFilePath -Value $headerText
+
+        # Header in Konsole (sichtbar, andere Farbe)
+        if ($Global:EnableConsoleOutput) {
+            Write-Host $headerText -ForegroundColor Magenta
+        }
+
+        # merken, dass dieses Script jetzt das letzte war
+        $Global:LastLogScriptName = $scriptName
+    }
+
     $timestamp = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
     $entry = "[$timestamp] [$Level] $Message"
 
@@ -103,5 +133,6 @@ function Get-LogConfig {
         ConsoleOutput   = $Global:EnableConsoleOutput
         MaxLogSizeMB    = $Global:MaxLogSizeMB
         DefaultFolder   = $Global:DefaultLogFolder
+        LastScriptName  = $Global:LastLogScriptName
     }
 }
