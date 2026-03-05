@@ -7,11 +7,9 @@ param(
 # GLOBAL ERROR HANDLING
 # ---------------------------------------------------------
 
-# Alle Fehler als "terminierend" behandeln
 $ErrorActionPreference = "Stop"
 $Global:PSDefaultParameterValues['*:ErrorAction'] = 'Stop'
 
-# Globaler Fehler-Logger
 Register-EngineEvent PowerShell.OnScriptError -Action {
     $msg = $_.SourceArgs[0].Exception.Message
     Write-Log -Level "ERROR" -Message "PowerShell-Fehler: $msg"
@@ -32,10 +30,8 @@ Import-Module $modulePath
 
 if (-not $RUN_IN_BACKGROUND) {
 
-    # Einmaliges Logfile pro Ausführung erzeugen
     $logFileName = "update_$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss').log"
 
-    # Logger initialisieren
     Initialize-Logger -FileName $logFileName -Level "INFO" -ConsoleOutput $true -MaxSizeMB 5
     Write-Log -Level INFO -Message "Starte Skript im Hintergrund..."
 
@@ -48,6 +44,7 @@ if (-not $RUN_IN_BACKGROUND) {
     Write-Log -Level INFO -Message "Skript läuft nun im Hintergrund."
     exit
 }
+
 
 # ---------------------------------------------------------
 # Hintergrundmodus – Logger initialisieren
@@ -91,52 +88,49 @@ Import-Module PSWindowsUpdate
 
 
 # ---------------------------------------------------------
-# Windows Updates suchen
+# Updates EINMAL abrufen
 # ---------------------------------------------------------
 
-Write-Log -Level INFO -Message "Suche nach Windows Updates..."
+Write-Log -Level INFO -Message "Suche nach Windows- und Treiberupdates..."
 
 try {
-    $windowsUpdates = Get-WindowsUpdate -MicrosoftUpdate -AcceptAll |
-        Where-Object { $_.UpdateType -ne "Driver" }
+    $allUpdates = Get-WindowsUpdate -MicrosoftUpdate -AcceptAll
 }
 catch {
-    Write-Log -Level ERROR -Message "Fehler beim Abrufen der Windows Updates: $($_.Exception.Message)"
+    Write-Log -Level ERROR -Message "Fehler beim Abrufen der Updates: $($_.Exception.Message)"
 }
 
-if (-not $windowsUpdates) {
-    Write-Log -Level INFO -Message "Keine Windows Updates gefunden."
-}
-else {
+$windowsUpdates = $allUpdates | Where-Object { $_.UpdateType -ne "Driver" }
+$driverUpdates  = $allUpdates | Where-Object { $_.UpdateType -eq "Driver" }
+
+
+# ---------------------------------------------------------
+# Windows Updates loggen
+# ---------------------------------------------------------
+
+if ($windowsUpdates) {
     Write-Log -Level INFO -Message "Gefundene Windows Updates:"
     $windowsUpdates | ForEach-Object {
         Write-Log -Level INFO -Message ("Windows Update: " + $_.Title)
     }
 }
-
-
-# ---------------------------------------------------------
-# Treiberupdates suchen
-# ---------------------------------------------------------
-
-Write-Log -Level INFO -Message "Suche nach Treiberupdates..."
-
-try {
-    $driverUpdates = Get-WindowsUpdate -MicrosoftUpdate -AcceptAll |
-        Where-Object { $_.UpdateType -eq "Driver" }
-}
-catch {
-    Write-Log -Level ERROR -Message "Fehler beim Abrufen der Treiberupdates: $($_.Exception.Message)"
-}
-
-if (-not $driverUpdates) {
-    Write-Log -Level INFO -Message "Keine Treiberupdates gefunden."
-}
 else {
+    Write-Log -Level INFO -Message "Keine Windows Updates gefunden."
+}
+
+
+# ---------------------------------------------------------
+# Treiberupdates loggen
+# ---------------------------------------------------------
+
+if ($driverUpdates) {
     Write-Log -Level INFO -Message "Gefundene Treiberupdates:"
     $driverUpdates | ForEach-Object {
         Write-Log -Level INFO -Message ("Treiber: " + $_.Title)
     }
+}
+else {
+    Write-Log -Level INFO -Message "Keine Treiberupdates gefunden."
 }
 
 
@@ -144,7 +138,7 @@ else {
 # Updates installieren
 # ---------------------------------------------------------
 
-if ($windowsUpdates -or $driverUpdates) {
+if ($allUpdates) {
     Write-Log -Level INFO -Message "Installiere Updates (Windows + Treiber)..."
 
     try {
