@@ -1,60 +1,104 @@
-# Ziel-MAC-Adresse
-$targetMac = "98-FA-9B-28-B0-22"
+<#
+.SYNOPSIS
+Findet ein Gerät anhand seiner MAC-Adresse im lokalen Netzwerk und baut eine SSH-Verbindung auf.
 
-Write-Host "Scanne Netzwerk nach MAC-Adresse $targetMac ..."
+.PARAMETER TargetMac
+MAC-Adresse des Zielgeräts im Format XX-XX-XX-XX-XX-XX (Windows ARP-Format).
 
-# ARP-Cache aktualisieren durch Ping-Broadcast
-try {
-    ping 255.255.255.255 -n 2 | Out-Null
-} catch {}
+.PARAMETER SshUser
+SSH-Benutzername. Standard: aktueller Windows-Benutzername.
+#>
+param(
+    [string]$TargetMac = "98-FA-9B-28-B0-22",
+    [string]$SshUser   = $env:USERNAME
+)
 
-# ARP-Tabelle auslesen
-$arp = arp -a
+$ErrorActionPreference = "Stop"
 
-# IP extrahieren
-$ip = ($arp | Select-String -Pattern $targetMac -SimpleMatch) `
-      -replace ".*\(", "" `
-      -replace "\).*", ""
+function Find-IpByMac {
+    param([string]$Mac)
 
-if (-not $ip) {
-    Write-Host "Keine IP gefunden. Starte erweiterten Scan..."
+    # ARP-Tabelle auslesen und nach MAC-Adresse suchen
+    # Windows ARP-Format: "  192.168.1.1          98-fa-9b-28-b0-22     dynamisch"
+    $arpOutput = arp -a
+    $macLower  = $Mac.ToLower()
 
-    # Lokales Subnetz automatisch bestimmen
-    $net = (Get-NetIPAddress -AddressFamily IPv4 |
-            Where-Object {$_.IPAddress -notlike "169.*"} |
-            Select-Object -First 1).PrefixOrigin
-
-    $ipInfo = Get-NetIPAddress -AddressFamily IPv4 |
-              Where-Object {$_.IPAddress -notlike "169.*"} |
-              Select-Object -First 1
-
-    $subnet = "$($ipInfo.IPAddress)/$($ipInfo.PrefixLength)"
-
-    Write-Host "Scanne Subnetz $subnet ..."
-
-    # Nmap verwenden, falls installiert
-    if (Get-Command nmap -ErrorAction SilentlyContinue) {
-        nmap -sn $subnet | Out-Null
-    } else {
-        Write-Host "Nmap nicht installiert. Führe stattdessen Ping-Sweep aus..."
-        for ($i=1; $i -le 254; $i++) {
-            ping "$($ipInfo.IPAddress.Substring(0, $ipInfo.IPAddress.LastIndexOf('.')+1))$i" -n 1 -w 5 | Out-Null
+    foreach ($line in $arpOutput) {
+        if ($line.ToLower() -match $macLower) {
+            # Erste Spalte = IP-Adresse (nach führendem Whitespace)
+            $ip = ($line.Trim() -split '\s+')[0]
+            if ($ip -match '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') {
+                return $ip
+            }
         }
     }
+    return $null
+}
 
-    # Erneut ARP prüfen
-    $arp = arp -a
-    $ip = ($arp | Select-String -Pattern $targetMac -SimpleMatch) `
-          -replace ".*\(", "" `
-          -replace "\).*", ""
+function Get-LocalSubnet {
+    $ipInfo = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+              Where-Object { $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*" } |
+              Select-Object -First 1
+
+    if (-not $ipInfo) { return $null, $null }
+    return $ipInfo.IPAddress, $ipInfo.PrefixLength
+}
+
+function Invoke-PingSweep {
+    param([string]$BaseIp)
+
+    Write-Host "Starte Ping-Sweep auf $BaseIp.1-254 ..."
+    $prefix = $BaseIp.Substring(0, $BaseIp.LastIndexOf('.') + 1)
+
+    1..254 | ForEach-Object {
+        Start-Process -FilePath "ping.exe" `
+            -ArgumentList "-n 1 -w 100 $prefix$_" `
+            -WindowStyle Hidden -ErrorAction SilentlyContinue
+    }
+    Start-Sleep -Seconds 3  # Antworten abwarten
+}
+
+# ---------------------------------------------------------
+# Hauptlogik
+# ---------------------------------------------------------
+
+Write-Host "Suche Geraet mit MAC-Adresse: $TargetMac"
+
+# Broadcast-Ping zur ARP-Cache-Aktualisierung
+try { ping -n 2 255.255.255.255 2>$null | Out-Null } catch {}
+
+$ip = Find-IpByMac -Mac $TargetMac
+
+if (-not $ip) {
+    Write-Host "Nicht im ARP-Cache. Starte erweiterten Scan..."
+
+    $localIp, $prefix = Get-LocalSubnet
+
+    if (-not $localIp) {
+        Write-Host "FEHLER: Keine aktive Netzwerkverbindung gefunden."
+        exit 1
+    }
+
+    Write-Host "Lokale IP: $localIp / Praefix: $prefix"
+
+    if (Get-Command nmap -ErrorAction SilentlyContinue) {
+        $subnet = "$localIp/$prefix"
+        Write-Host "Nutze nmap fuer Subnetz-Scan: $subnet"
+        nmap -sn $subnet | Out-Null
+    } else {
+        Write-Host "nmap nicht gefunden. Nutze Ping-Sweep..."
+        Invoke-PingSweep -BaseIp $localIp
+    }
+
+    $ip = Find-IpByMac -Mac $TargetMac
 }
 
 if (-not $ip) {
-    Write-Host "IP konnte nicht gefunden werden."
-    exit
+    Write-Host "FEHLER: Geraet mit MAC $TargetMac nicht gefunden."
+    exit 1
 }
 
 Write-Host "Gefundene IP: $ip"
-Write-Host "Starte SSH-Verbindung..."
+Write-Host "Starte SSH als $SshUser@$ip ..."
 
-ssh "$env:USERNAME@$ip"
+ssh "$SshUser@$ip"

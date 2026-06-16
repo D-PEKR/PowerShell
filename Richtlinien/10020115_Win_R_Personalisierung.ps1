@@ -160,14 +160,14 @@ try {
     Set-ItemProperty -Path $RegPers -Name 'NoChangingLockScreen' -Value 1               -Type DWord
     Write-Log -Level INFO -Message 'ADMX-Policy für Sperrbildschirm gesetzt (HKLM\...\Personalization)'
 
-    # Optionale Benutzer-Sperren (HKCU)
-    Set-ItemProperty -Path $RegSystem   -Name 'NoDispAppearancePage' -Value 1 -Type DWord
-    Set-ItemProperty -Path $RegExplorer -Name 'NoThemesTab'          -Value 1 -Type DWord
-    Set-ItemProperty -Path $RegActive   -Name 'NoChangingWallPaper'  -Value 1 -Type DWord
-    Set-ItemProperty -Path $RegExplorer -Name 'NoSaveSettings'       -Value 1 -Type DWord
-    Set-ItemProperty -Path $RegSystem   -Name 'NoDispCPL'            -Value 1 -Type DWord
-    Set-ItemProperty -Path $RegExplorer -Name 'ThemeFile'            -Value $UserWallpaper -Type String
-    Write-Log -Level INFO -Message 'Zusätzliche Benutzer-Richtlinien gesetzt (HKCU\...\Policies)'
+    # Benutzer-Sperren (HKCU) – nur Hintergrundbild und Design sperren.
+    # NoDispCPL und NoSaveSettings werden NICHT gesetzt, damit der Benutzer
+    # weiterhin Bildschirmauflösung, Anordnung (Multi-Monitor) und
+    # Desktop-Icon-Positionen ändern kann.
+    Set-ItemProperty -Path $RegExplorer -Name 'NoThemesTab'         -Value 1 -Type DWord
+    Set-ItemProperty -Path $RegActive   -Name 'NoChangingWallPaper' -Value 1 -Type DWord
+    Set-ItemProperty -Path $RegExplorer -Name 'ThemeFile'           -Value $UserWallpaper -Type String
+    Write-Log -Level INFO -Message 'Benutzer-Richtlinien gesetzt: Hintergrundbild + Design gesperrt; Bildschirm-Einstellungen erlaubt'
 }
 catch {
     Write-Log -Level ERROR -Message "Fehler beim Setzen der ADMX-Richtlinien: $($_.Exception.Message)"

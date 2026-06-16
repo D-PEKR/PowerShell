@@ -1,3 +1,7 @@
+#Requires -Version 5.1
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
 # =====================================================================
 #  Logging-Modul laden
 # =====================================================================
@@ -5,10 +9,7 @@ $modulePath = 'C:\Users\Public\10020115_WinScripts\Win11_C\Software\Scripte\Logg
 Import-Module -Name $modulePath -ErrorAction Stop
 
 Initialize-Logger -Level 'INFO'
-Write-Log -Level INFO -Message "Scriptstart: Geräteprüfung & Installation"
-
-Set-StrictMode -Version Latest
-$ErrorActionPreference = 'Stop'
+Write-Log -Level INFO -Message "Scriptstart: Geraetepruefung & BIOS-Tool-Installation"
 
 # =====================================================================
 #  Helper-Funktionen
@@ -26,12 +27,12 @@ function Test-IsAdmin {
 
 function Test-HasHPCMSL {
     if (Get-InstalledModule -Name 'HPCMSL' -ErrorAction SilentlyContinue) { return $true }
-    if (Get-Module -ListAvailable -Name 'HPCMSL') { return $true }
+    if (Get-Module -ListAvailable -Name 'HPCMSL')                         { return $true }
     return $false
 }
 
 function Ensure-PackageInfra {
-    Write-Log INFO "Stelle Paket-Infrastruktur sicher..."
+    Write-Log -Level INFO -Message "Stelle Paket-Infrastruktur sicher (NuGet, PSGallery)..."
 
     try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
 
@@ -50,21 +51,23 @@ function Ensure-PackageInfra {
         Register-PSRepository -Default -ErrorAction Stop
         Set-PSRepository -Name 'PSGallery' -InstallationPolicy Trusted -ErrorAction Stop
     }
+
+    Write-Log -Level INFO -Message "Paket-Infrastruktur bereit."
 }
 
 function Install-LenovoSystemUpdate {
-    $installerPath = "LenovoBiosInstall\system_update.exe"
+    param(
+        [string]$InstallerPath = "LenovoBiosInstall\system_update.exe"
+    )
 
-    if (-not (Test-Path $installerPath)) {
-        Write-Log ERROR "Lenovo Installer nicht gefunden: $installerPath"
-        throw "Lenovo Installer fehlt."
+    if (-not (Test-Path $InstallerPath)) {
+        Write-Log -Level ERROR -Message "Lenovo Installer nicht gefunden: $InstallerPath"
+        throw "Lenovo Installer fehlt. Bitte von https://support.lenovo.com herunterladen."
     }
 
-    Write-Log INFO "Starte Lenovo System Update Installation..."
-
-    Start-Process -FilePath $installerPath -ArgumentList "/VERYSILENT /NORESTART" -Wait
-
-    Write-Log INFO "Lenovo System Update erfolgreich installiert."
+    Write-Log -Level INFO -Message "Starte Lenovo System Update Installation: $InstallerPath"
+    Start-Process -FilePath $InstallerPath -ArgumentList "/VERYSILENT /NORESTART" -Wait -ErrorAction Stop
+    Write-Log -Level INFO -Message "Lenovo System Update erfolgreich installiert."
 }
 
 # =====================================================================
@@ -72,59 +75,49 @@ function Install-LenovoSystemUpdate {
 # =====================================================================
 
 $manufacturer = (Get-CimInstance Win32_ComputerSystem).Manufacturer.Trim()
-Write-Log INFO "Hersteller erkannt: $manufacturer"
+Write-Log -Level INFO -Message "Geraetehersteller erkannt: $manufacturer"
 
 # =====================================================================
 #  Hauptlogik
 # =====================================================================
 
 try {
-
     switch -Wildcard ($manufacturer) {
 
         "HP*" {
-            Write-Log INFO "HP-Gerät erkannt HPCMSL wird geprüft."
+            Write-Log -Level INFO -Message "HP-Geraet erkannt – pruefe HPCMSL..."
 
             if (Test-HasHPCMSL) {
-                Write-Log INFO "HPCMSL bereits installiert. Vorgang beendet."
+                Write-Log -Level INFO -Message "HPCMSL bereits installiert. Kein Handlungsbedarf."
                 exit 0
             }
 
-            Write-Log INFO "HPCMSL nicht gefunden Installation wird vorbereitet..."
+            Write-Log -Level INFO -Message "HPCMSL nicht gefunden – Installation wird vorbereitet..."
             Ensure-PackageInfra
 
             $scope = if (Test-IsAdmin) { 'AllUsers' } else { 'CurrentUser' }
-            Write-Log INFO "Installations-Scope: $scope"
+            Write-Log -Level INFO -Message "Installations-Scope: $scope"
 
             Install-Module -Name 'HPCMSL' -Scope $scope -Force -AcceptLicense -ErrorAction Stop
-
             Import-Module HPCMSL -ErrorAction Stop
-            $ver = (Get-Module HPCMSL).Version
-            Write-Log INFO "HPCMSL erfolgreich installiert. Version: $ver"
 
+            $ver = (Get-Module HPCMSL).Version
+            Write-Log -Level INFO -Message "HPCMSL erfolgreich installiert. Version: $ver"
             exit 0
         }
 
         "Lenovo*" {
-            Write-Log INFO "Lenovo-Gerät erkannt Lenovo System Update wird installiert."
+            Write-Log -Level INFO -Message "Lenovo-Geraet erkannt – installiere Lenovo System Update..."
             Install-LenovoSystemUpdate
             exit 0
         }
 
         default {
-            Write-Log WARNING "Unbekannter Hersteller: $manufacturer keine Installation durchgeführt."
+            Write-Log -Level WARN -Message "Unbekannter Hersteller '$manufacturer' – keine Installation durchgefuehrt."
             exit 0
         }
     }
-
-}
-catch {
-    Write-Log ERROR "Fehler: $($_.Exception.Message)"
+} catch {
+    Write-Log -Level ERROR -Message "Kritischer Fehler: $($_.Exception.Message)"
     exit 1
 }
-
-
-
-
-# Für lenovo
-# https://support.lenovo.com/us/en/downloads/ds012808-lenovo-system-update-for-windows-10-7-32-bit-64-bit-desktop-notebook-workstation
