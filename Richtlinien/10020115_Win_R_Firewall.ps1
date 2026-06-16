@@ -75,22 +75,71 @@ foreach ($rule in $rulesToEnable) {
 }
 
 # ---------------------------------------------------------
-# 4) Sicherheits-Haertung fuer Public-Profil
+# 4) TeamViewer – explizite Ausgehend-Regeln für alle Profile
+#    TeamViewer nutzt ausgehende Verbindungen zu Relay-Servern
+#    (Port 5938, Fallback 443/80). Keine eingehenden Ports nötig.
+#    Explizite Regeln stellen sicher, dass auch das gehärtete
+#    Public-Profil TeamViewer nicht blockiert.
+# ---------------------------------------------------------
+
+$tvExe = "C:\Program Files\TeamViewer\TeamViewer.exe"
+
+$tvRules = @(
+    @{ Name = "TeamViewer-Out-5938";  Port = 5938; Proto = "TCP" },
+    @{ Name = "TeamViewer-Out-5938U"; Port = 5938; Proto = "UDP" },
+    @{ Name = "TeamViewer-Out-443";   Port = 443;  Proto = "TCP" },
+    @{ Name = "TeamViewer-Out-80";    Port = 80;   Proto = "TCP" }
+)
+
+foreach ($rule in $tvRules) {
+    try {
+        $existing = Get-NetFirewallRule -Name $rule.Name -ErrorAction SilentlyContinue
+        if ($existing) {
+            Set-NetFirewallRule -Name $rule.Name `
+                -Action Allow -Direction Outbound -Enabled True `
+                -Profile Any -ErrorAction Stop
+            Write-Log -Level INFO -Message "TeamViewer-Regel aktualisiert: $($rule.Name)"
+        } else {
+            $params = @{
+                Name        = $rule.Name
+                DisplayName = $rule.Name
+                Direction   = "Outbound"
+                Action      = "Allow"
+                Protocol    = $rule.Proto
+                RemotePort  = $rule.Port
+                Profile     = "Any"
+                Enabled     = "True"
+            }
+            # Regel nur an TeamViewer.exe binden wenn installiert
+            if (Test-Path $tvExe) { $params["Program"] = $tvExe }
+
+            New-NetFirewallRule @params -ErrorAction Stop | Out-Null
+            Write-Log -Level INFO -Message "TeamViewer-Regel erstellt: $($rule.Name) (Port $($rule.Port)/$($rule.Proto))"
+        }
+    } catch {
+        Write-Log -Level WARN -Message "Fehler bei TeamViewer-Regel '$($rule.Name)': $($_.Exception.Message)"
+    }
+}
+
+# ---------------------------------------------------------
+# 5) Sicherheits-Haertung fuer Public-Profil
+#    AllowLocalFirewallRules bleibt $true damit TeamViewer und
+#    andere Programme eigene Regeln registrieren koennen.
 # ---------------------------------------------------------
 
 try {
     Set-NetFirewallProfile -Profile Public `
-        -AllowInboundRules $false `
-        -AllowLocalFirewallRules $false `
+        -AllowInboundRules             $false `
+        -AllowLocalFirewallRules       $true  `
         -AllowUnicastResponseToMulticast $false
 
-    Write-Log -Level INFO -Message "Public-Profil gehaertet (keine lokalen Regeln, kein Multicast-Antwort)."
+    Write-Log -Level INFO -Message "Public-Profil gehaertet (eingehende Regeln gesperrt, lokale Ausgehend-Regeln erlaubt)."
 } catch {
     Write-Log -Level WARN -Message "Public-Profil-Haertung teilweise fehlgeschlagen: $($_.Exception.Message)"
 }
 
 # ---------------------------------------------------------
-# 5) Firewall-Status ausgeben
+# 6) Firewall-Status ausgeben
 # ---------------------------------------------------------
 
 try {
